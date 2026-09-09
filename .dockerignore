@@ -1,0 +1,12 @@
+.git
+.gitignore
+**/node_modules
+**/target
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/*.egg-info
+docs
+logs
+uploads
