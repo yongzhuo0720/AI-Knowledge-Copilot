@@ -16,3 +16,11 @@ spring:
       port: ${REDIS_PORT:6379}
       database: ${REDIS_DATABASE:0}
       timeout: ${REDIS_TIMEOUT:2s}
+
+storage:
+  minio:
+    enabled: true
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ROOT_USER:minioadmin}
+    secret-key: ${MINIO_ROOT_PASSWORD:change-me-minio}
+    bucket: ${MINIO_BUCKET:ai-copilot}
