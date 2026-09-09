@@ -1,0 +1,30 @@
+# Java / Maven
+target/
+.mvn/
+*.class
+
+# Node / Vue
+node_modules/
+dist/
+.vite/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Runtime files
+logs/
+uploads/
+
