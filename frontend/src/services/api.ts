@@ -57,3 +57,17 @@ export async function registerDocument(
   if (!response.ok) throw new Error(`登记文档失败：${response.status}`)
   return response.json() as Promise<ApiResponse<KnowledgeDocument>>
 }
+
+export async function uploadDocument(
+  knowledgeBaseId: number,
+  file: File,
+): Promise<ApiResponse<KnowledgeDocument>> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents/upload`, {
+    method: 'POST',
+    body: formData,
+  })
+  if (!response.ok) throw new Error(`上传文档失败：${response.status}`)
+  return response.json() as Promise<ApiResponse<KnowledgeDocument>>
+}

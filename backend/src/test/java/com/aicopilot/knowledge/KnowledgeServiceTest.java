@@ -1,5 +1,6 @@
 package com.aicopilot.knowledge;
 
+import com.aicopilot.common.storage.ObjectStorageService;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -19,7 +20,7 @@ class KnowledgeServiceTest {
         KnowledgeBase saved = new KnowledgeBase(20L, 10L, "研发资料", "架构文档", "ACTIVE");
         when(repository.saveKnowledgeBase(any(KnowledgeBase.class))).thenReturn(saved);
 
-        KnowledgeBaseResponse response = new KnowledgeService(repository, mock(DocumentProcessingClient.class))
+        KnowledgeBaseResponse response = new KnowledgeService(repository, mock(DocumentProcessingClient.class), mock(ObjectStorageService.class))
                 .createKnowledgeBase(new CreateKnowledgeBaseRequest(10L, " 研发资料 ", " 架构文档 "));
 
         assertThat(response).isEqualTo(new KnowledgeBaseResponse(20L, 10L, "研发资料", "架构文档", "ACTIVE"));
@@ -30,12 +31,13 @@ class KnowledgeServiceTest {
     void registersDocumentWithUploadedStatus() {
         KnowledgeRepository repository = mock(KnowledgeRepository.class);
         DocumentProcessingClient processingClient = mock(DocumentProcessingClient.class);
+        ObjectStorageService storageService = mock(ObjectStorageService.class);
         KnowledgeDocument saved = new KnowledgeDocument(
                 30L, 20L, "guide.pdf", "kb/20/guide.pdf", "application/pdf", 2048L, "UPLOADED", Instant.now()
         );
         when(repository.saveDocument(any(KnowledgeDocument.class))).thenReturn(saved);
 
-        KnowledgeDocumentResponse response = new KnowledgeService(repository, processingClient)
+        KnowledgeDocumentResponse response = new KnowledgeService(repository, processingClient, storageService)
                 .registerDocument(20L, new RegisterDocumentRequest(
                         " guide.pdf ", " kb/20/guide.pdf ", " application/pdf ", 2048L
                 ));
@@ -56,7 +58,7 @@ class KnowledgeServiceTest {
                 new KnowledgeDocument(30L, 20L, "guide.pdf", "kb/20/guide.pdf", "application/pdf", 2048L, "UPLOADED", createdAt)
         ));
 
-        List<KnowledgeDocumentResponse> response = new KnowledgeService(repository, mock(DocumentProcessingClient.class))
+        List<KnowledgeDocumentResponse> response = new KnowledgeService(repository, mock(DocumentProcessingClient.class), mock(ObjectStorageService.class))
                 .findDocuments(20L);
 
         assertThat(response).containsExactly(new KnowledgeDocumentResponse(
