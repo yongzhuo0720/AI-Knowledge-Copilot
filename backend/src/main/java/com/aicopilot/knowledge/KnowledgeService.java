@@ -12,9 +12,14 @@ import java.util.List;
 public class KnowledgeService {
 
     private final KnowledgeRepository knowledgeRepository;
+    private final DocumentProcessingClient documentProcessingClient;
 
-    public KnowledgeService(KnowledgeRepository knowledgeRepository) {
+    public KnowledgeService(
+            KnowledgeRepository knowledgeRepository,
+            DocumentProcessingClient documentProcessingClient
+    ) {
         this.knowledgeRepository = knowledgeRepository;
+        this.documentProcessingClient = documentProcessingClient;
     }
 
     @Transactional
@@ -40,6 +45,11 @@ public class KnowledgeService {
                 request.fileSize(),
                 "UPLOADED",
                 Instant.now()
+        ));
+        documentProcessingClient.submit(new DocumentProcessingRequest(
+                document.objectKey(),
+                document.originalFilename(),
+                document.contentType()
         ));
         return KnowledgeDocumentResponse.from(document);
     }
