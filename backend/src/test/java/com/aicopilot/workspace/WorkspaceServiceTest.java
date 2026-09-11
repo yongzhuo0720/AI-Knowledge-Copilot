@@ -64,4 +64,16 @@ class WorkspaceServiceTest {
                 .isInstanceOf(AccessDeniedException.class);
         org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).addMember(any());
     }
+
+    @Test
+    void rejectsMemberListForNonMember() {
+        WorkspaceRepository repository = mock(WorkspaceRepository.class);
+        when(repository.isMember(10L, 99L)).thenReturn(false);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        new WorkspaceService(repository).findMembers(99L, 10L))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessage("user is not a member of this workspace");
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).findMembers(10L);
+    }
 }

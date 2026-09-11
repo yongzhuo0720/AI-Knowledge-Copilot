@@ -14,6 +14,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
 
 class ConversationServiceTest {
 
@@ -43,5 +44,19 @@ class ConversationServiceTest {
         assertThat(reply.assistantMessage().sources()).containsExactly(source);
         verify(knowledgeService).assertKnowledgeBaseAccess(20L, 3L);
         verify(repository).touchSession(7L);
+    }
+
+    @Test
+    void rejectsAccessToAnotherUsersSession() {
+        ConversationRepository repository = mock(ConversationRepository.class);
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        when(repository.findSession(7L, 20L, 99L)).thenReturn(java.util.Optional.empty());
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        new ConversationService(repository, knowledgeService, mock(KnowledgeAnswerClient.class))
+                                .findMessages(99L, 20L, 7L))
+                .isInstanceOf(com.aicopilot.common.exception.AccessDeniedException.class)
+                .hasMessage("user cannot access this conversation");
+        verify(repository, never()).findMessages(7L);
     }
 }
