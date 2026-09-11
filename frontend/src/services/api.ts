@@ -65,10 +65,24 @@ export interface LoginResponse {
   user: { id: number; username: string; email: string; status: string }
 }
 
+export interface Workspace {
+  id: number
+  name: string
+  ownerUserId: number
+}
+
 function userHeaders(userId: number): HeadersInit {
   void userId
   const token = localStorage.getItem('accessToken')
   return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+async function parseResponse<T>(response: Response, fallback: string): Promise<ApiResponse<T>> {
+  const payload = await response.json().catch(() => null) as ApiResponse<T> | null
+  if (!response.ok) {
+    throw new Error(payload?.message ? `${fallback}：${payload.message}` : `${fallback}：${response.status}`)
+  }
+  return payload as ApiResponse<T>
 }
 
 export async function login(email: string, password: string): Promise<ApiResponse<LoginResponse>> {
@@ -77,16 +91,30 @@ export async function login(email: string, password: string): Promise<ApiRespons
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
   })
-  if (!response.ok) throw new Error(`登录失败：${response.status}`)
-  return response.json() as Promise<ApiResponse<LoginResponse>>
+  return parseResponse<LoginResponse>(response, '登录失败')
+}
+
+export async function registerUser(username: string, email: string, password: string): Promise<ApiResponse<{ id: number; username: string; email: string; status: string }>> {
+  const response = await fetch('/api/v1/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, email, password }),
+  })
+  return parseResponse(response, '注册失败')
 }
 
 export async function getHealth(): Promise<ApiResponse<{ status: string }>> {
   const response = await fetch('/api/v1/health')
-  if (!response.ok) {
-    throw new Error(`请求失败：${response.status}`)
-  }
-  return response.json() as Promise<ApiResponse<{ status: string }>>
+  return parseResponse<{ status: string }>(response, '请求失败')
+}
+
+export async function createWorkspace(userId: number, name: string): Promise<ApiResponse<Workspace>> {
+  const response = await fetch('/api/v1/workspaces', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
+    body: JSON.stringify({ name, ownerUserId: userId }),
+  })
+  return parseResponse<Workspace>(response, '创建工作空间失败')
 }
 
 export async function createKnowledgeBase(
@@ -100,8 +128,7 @@ export async function createKnowledgeBase(
     headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
     body: JSON.stringify({ workspaceId, name, description }),
   })
-  if (!response.ok) throw new Error(`创建知识库失败：${response.status}`)
-  return response.json() as Promise<ApiResponse<KnowledgeBase>>
+  return parseResponse<KnowledgeBase>(response, '创建知识库失败')
 }
 
 export async function registerDocument(
@@ -114,8 +141,7 @@ export async function registerDocument(
     headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
     body: JSON.stringify(document),
   })
-  if (!response.ok) throw new Error(`登记文档失败：${response.status}`)
-  return response.json() as Promise<ApiResponse<KnowledgeDocument>>
+  return parseResponse<KnowledgeDocument>(response, '登记文档失败')
 }
 
 export async function uploadDocument(
@@ -130,14 +156,12 @@ export async function uploadDocument(
     headers: userHeaders(userId),
     body: formData,
   })
-  if (!response.ok) throw new Error(`上传文档失败：${response.status}`)
-  return response.json() as Promise<ApiResponse<KnowledgeDocument>>
+  return parseResponse<KnowledgeDocument>(response, '上传文档失败')
 }
 
 export async function listDocuments(userId: number, knowledgeBaseId: number): Promise<ApiResponse<KnowledgeDocument[]>> {
   const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents`, { headers: userHeaders(userId) })
-  if (!response.ok) throw new Error(`获取文档列表失败：${response.status}`)
-  return response.json() as Promise<ApiResponse<KnowledgeDocument[]>>
+  return parseResponse<KnowledgeDocument[]>(response, '获取文档列表失败')
 }
 
 export async function refreshDocumentProcessingStatus(
@@ -149,8 +173,7 @@ export async function refreshDocumentProcessingStatus(
     `/api/v1/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/processing-status`,
     { headers: userHeaders(userId) },
   )
-  if (!response.ok) throw new Error(`查询解析状态失败：${response.status}`)
-  return response.json() as Promise<ApiResponse<KnowledgeDocument>>
+  return parseResponse<KnowledgeDocument>(response, '查询解析状态失败')
 }
 
 export async function reparseDocument(
@@ -162,8 +185,7 @@ export async function reparseDocument(
     `/api/v1/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/reparse`,
     { method: 'POST', headers: userHeaders(userId) },
   )
-  if (!response.ok) throw new Error(`重新解析文档失败：${response.status}`)
-  return response.json() as Promise<ApiResponse<KnowledgeDocument>>
+  return parseResponse<KnowledgeDocument>(response, '重新解析文档失败')
 }
 
 export async function retryDocumentProcessing(
@@ -175,8 +197,7 @@ export async function retryDocumentProcessing(
     `/api/v1/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/processing-retry`,
     { method: 'POST', headers: userHeaders(userId) },
   )
-  if (!response.ok) throw new Error(`重试解析任务失败：${response.status}`)
-  return response.json() as Promise<ApiResponse<KnowledgeDocument>>
+  return parseResponse<KnowledgeDocument>(response, '重试解析任务失败')
 }
 
 export async function searchKnowledge(
@@ -189,16 +210,14 @@ export async function searchKnowledge(
     headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
     body: JSON.stringify({ query }),
   })
-  if (!response.ok) throw new Error(`检索知识库失败：${response.status}`)
-  return response.json() as Promise<ApiResponse<KnowledgeRetrievalChunk[]>>
+  return parseResponse<KnowledgeRetrievalChunk[]>(response, '检索知识库失败')
 }
 
 export async function askKnowledge(userId: number, knowledgeBaseId: number, question: string): Promise<ApiResponse<KnowledgeAnswer>> {
   const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/answer`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...userHeaders(userId) }, body: JSON.stringify({ question }),
   })
-  if (!response.ok) throw new Error(`知识问答失败：${response.status}`)
-  return response.json() as Promise<ApiResponse<KnowledgeAnswer>>
+  return parseResponse<KnowledgeAnswer>(response, '知识问答失败')
 }
 
 export async function createConversation(
@@ -211,8 +230,7 @@ export async function createConversation(
     headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
     body: JSON.stringify({ title }),
   })
-  if (!response.ok) throw new Error(`创建会话失败：${response.status}`)
-  return response.json() as Promise<ApiResponse<ConversationSession>>
+  return parseResponse<ConversationSession>(response, '创建会话失败')
 }
 
 export async function listConversations(
@@ -222,8 +240,7 @@ export async function listConversations(
   const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/conversations`, {
     headers: userHeaders(userId),
   })
-  if (!response.ok) throw new Error(`获取会话列表失败：${response.status}`)
-  return response.json() as Promise<ApiResponse<ConversationSession[]>>
+  return parseResponse<ConversationSession[]>(response, '获取会话列表失败')
 }
 
 export async function listConversationMessages(
@@ -235,8 +252,7 @@ export async function listConversationMessages(
     `/api/v1/knowledge-bases/${knowledgeBaseId}/conversations/${sessionId}/messages`,
     { headers: userHeaders(userId) },
   )
-  if (!response.ok) throw new Error(`获取会话消息失败：${response.status}`)
-  return response.json() as Promise<ApiResponse<ConversationMessage[]>>
+  return parseResponse<ConversationMessage[]>(response, '获取会话消息失败')
 }
 
 export async function askConversation(
@@ -253,6 +269,5 @@ export async function askConversation(
       body: JSON.stringify({ question }),
     },
   )
-  if (!response.ok) throw new Error(`会话问答失败：${response.status}`)
-  return response.json() as Promise<ApiResponse<ConversationReply>>
+  return parseResponse<ConversationReply>(response, '会话问答失败')
 }

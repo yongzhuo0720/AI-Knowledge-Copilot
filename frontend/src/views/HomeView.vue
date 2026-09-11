@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 
 import { getHealth } from '@/services/api'
 
@@ -25,6 +26,7 @@ onMounted(async () => {
         <span class="status-dot" :class="{ online: backendStatus === 'UP' }" />
         <span>后端服务：{{ backendStatus }}</span>
       </div>
+      <RouterLink class="primary-link" to="/knowledge">登录并进入知识库</RouterLink>
     </section>
   </main>
 </template>
