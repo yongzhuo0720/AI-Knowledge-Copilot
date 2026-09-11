@@ -86,3 +86,21 @@ def retrieve_chunks(knowledge_base_id: int, query: str, limit: int) -> list[dict
     results = collection.search([embed(query)], "embedding", {"metric_type": "IP", "params": {}}, limit=limit,
                                 expr=f"knowledge_base_id == {knowledge_base_id}", output_fields=["object_key", "content"])
     return [{"document_object_key": hit.entity.get("object_key"), "content": hit.entity.get("content"), "score": hit.score} for hit in results[0]]
+
+
+def count_chunks(knowledge_base_ids: list[int]) -> int:
+    from pymilvus import Collection, connections, utility
+    from app.settings import settings
+
+    if not knowledge_base_ids:
+        return 0
+    connections.connect(alias="default", host=settings.milvus_host, port=str(settings.milvus_port))
+    if not utility.has_collection(COLLECTION_NAME):
+        return 0
+    collection = Collection(COLLECTION_NAME)
+    expression = ",".join(str(knowledge_base_id) for knowledge_base_id in knowledge_base_ids)
+    rows = collection.query(
+        expr=f"knowledge_base_id in [{expression}]",
+        output_fields=["count(*)"],
+    )
+    return int(rows[0].get("count(*)", 0)) if rows else 0

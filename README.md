@@ -188,6 +188,7 @@ Authorization: Bearer <access-token>
 | `POST` | `/api/v1/users/login` | 登录并获取 Token | 否 |
 | `POST` | `/api/v1/workspaces` | 创建工作空间 | 是 |
 | `GET` | `/api/v1/workspaces` | 获取当前用户可访问的工作空间 | 是 |
+| `GET` | `/api/v1/workspaces/{workspaceId}/overview` | 获取 Workspace 统计、最近知识库、文档和会话 | 是 |
 | `GET` | `/api/v1/workspaces/{workspaceId}/members` | 查看成员 | 是 |
 | `POST` | `/api/v1/workspaces/{workspaceId}/members` | 添加成员 | OWNER/ADMIN |
 
@@ -223,6 +224,7 @@ Authorization: Bearer <access-token>
 | `GET` | `/api/v1/document-processing/tasks/{taskId}` | 查询任务 |
 | `POST` | `/api/v1/document-processing/tasks/{taskId}/retry` | 重试任务 |
 | `POST` | `/api/v1/retrieval/search` | 向量检索 |
+| `GET` | `/api/v1/retrieval/stats?knowledge_base_ids={ids}` | 查询 Milvus 已索引 Chunk 数 |
 | `POST` | `/api/v1/answers` | 模型回答 |
 
 ## 配置说明

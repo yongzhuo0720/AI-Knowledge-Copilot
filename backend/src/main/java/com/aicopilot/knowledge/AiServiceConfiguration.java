@@ -3,6 +3,7 @@ package com.aicopilot.knowledge;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.aicopilot.conversation.ConversationMessage;
+import com.aicopilot.dashboard.IndexedChunkClient;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -134,6 +135,34 @@ public class AiServiceConfiguration {
                 if (connection != null) {
                     connection.disconnect();
                 }
+            }
+        };
+    }
+
+    @Bean
+    IndexedChunkClient indexedChunkClient(AiServiceProperties properties, ObjectMapper objectMapper) {
+        return knowledgeBaseIds -> {
+            if (!properties.isEnabled() || knowledgeBaseIds.isEmpty()) return 0L;
+            try {
+                HttpURLConnection connection = (HttpURLConnection) new URL(
+                        properties.getBaseUrl() + "/api/v1/retrieval/stats?knowledge_base_ids="
+                                + knowledgeBaseIds.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(","))
+                ).openConnection();
+                connection.setRequestMethod("GET");
+                connection.setConnectTimeout(5_000);
+                connection.setReadTimeout(10_000);
+                if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
+                    return null;
+                }
+                try (InputStream inputStream = connection.getInputStream()) {
+                    JsonNode response = objectMapper.readTree(inputStream);
+                    JsonNode count = response.path("data").path("indexed_chunk_count");
+                    return "0".equals(response.path("code").asText()) && count.isNumber() ? count.longValue() : null;
+                } finally {
+                    connection.disconnect();
+                }
+            } catch (IOException exception) {
+                return null;
             }
         };
     }

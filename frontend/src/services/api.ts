@@ -71,6 +71,39 @@ export interface Workspace {
   ownerUserId: number
 }
 
+export interface WorkspaceOverview {
+  workspaceId: number
+  knowledgeBaseCount: number
+  documentCount: number
+  indexedChunkCount: number | null
+  conversationCount: number
+  processingTaskCount: number
+  recentKnowledgeBases: Array<{
+    id: number
+    name: string
+    status: string
+    updatedAt: string
+    documentCount: number
+  }>
+  recentDocuments: Array<{
+    id: number
+    knowledgeBaseId: number
+    knowledgeBaseName: string
+    originalFilename: string
+    contentType: string
+    fileSize: number
+    status: string
+    createdAt: string
+  }>
+  recentConversations: Array<{
+    id: number
+    title: string
+    knowledgeBaseId: number
+    knowledgeBaseName: string
+    updatedAt: string
+  }>
+}
+
 function userHeaders(userId: number): HeadersInit {
   void userId
   const token = localStorage.getItem('accessToken')
@@ -120,6 +153,11 @@ export async function createWorkspace(userId: number, name: string): Promise<Api
 export async function listWorkspaces(userId: number): Promise<ApiResponse<Workspace[]>> {
   const response = await fetch('/api/v1/workspaces', { headers: userHeaders(userId) })
   return parseResponse<Workspace[]>(response, '获取工作空间失败')
+}
+
+export async function getWorkspaceOverview(userId: number, workspaceId: number): Promise<ApiResponse<WorkspaceOverview>> {
+  const response = await fetch(`/api/v1/workspaces/${workspaceId}/overview`, { headers: userHeaders(userId) })
+  return parseResponse<WorkspaceOverview>(response, '获取工作空间概览失败')
 }
 
 export async function createKnowledgeBase(

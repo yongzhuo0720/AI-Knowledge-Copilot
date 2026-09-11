@@ -2,11 +2,11 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from app.indexing import retrieve_chunks
+from app.indexing import count_chunks, retrieve_chunks
 from app.answering import answer_question
 from app.processing import get_parse_task, process_parse_task, recover_parse_tasks, retry_parse_task, submit_parse_task
 from app.schemas import AnswerRequest, ParseDocumentRequest, RetrievalRequest
@@ -81,6 +81,19 @@ def search_knowledge(request: RetrievalRequest) -> dict[str, object]:
         "code": "0",
         "message": "success",
         "data": retrieve_chunks(request.knowledge_base_id, request.query, request.limit),
+    }
+
+
+@app.get("/api/v1/retrieval/stats", response_model=dict[str, object])
+def retrieval_stats(knowledge_base_ids: str = Query(default="")) -> dict[str, object]:
+    try:
+        ids = [int(value) for value in knowledge_base_ids.split(",") if value.strip()]
+    except ValueError as exception:
+        raise HTTPException(status_code=422, detail="knowledge_base_ids must be comma-separated integers") from exception
+    return {
+        "code": "0",
+        "message": "success",
+        "data": {"indexed_chunk_count": count_chunks(ids)},
     }
 
 
