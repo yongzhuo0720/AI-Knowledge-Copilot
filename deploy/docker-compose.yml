@@ -34,6 +34,32 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    environment:
+      AI_SERVICE_MINIO_ENDPOINT: minio:9000
+      AI_SERVICE_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      AI_SERVICE_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      AI_SERVICE_MINIO_BUCKET: ai-copilot
+      AI_SERVICE_MILVUS_HOST: milvus
+      AI_SERVICE_MILVUS_PORT: 19530
+      AI_SERVICE_MYSQL_HOST: mysql
+      AI_SERVICE_MYSQL_PORT: 3306
+      AI_SERVICE_MYSQL_DATABASE: ${MYSQL_DATABASE}
+      AI_SERVICE_MYSQL_USER: ${MYSQL_USER}
+      AI_SERVICE_MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      AI_SERVICE_TASK_STORE_ENABLED: "true"
+      AI_SERVICE_TASK_MAX_RETRIES: 3
+      AI_SERVICE_TASK_RETRY_BACKOFF_SECONDS: 2
+      AI_SERVICE_TASK_RECOVERY_INTERVAL_SECONDS: 5
+      AI_SERVICE_TASK_PROCESSING_STALE_SECONDS: 300
+      AI_SERVICE_CHAT_API_KEY: ${DEEPSEEK_API_KEY}
+      AI_SERVICE_EMBEDDING_API_KEY: ${DASHSCOPE_API_KEY}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      milvus:
+        condition: service_started
 
   frontend:
     build:

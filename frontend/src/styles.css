@@ -141,7 +141,27 @@ button:disabled { cursor: wait; opacity: 0.6; }
 .result-card { display: grid; gap: 12px; }
 .result-card span, .empty, .message { color: #697386; }
 .success { color: #238653; }
+.secondary { background: #edf0fb; color: #4054b6; }
+.document-list { display: grid; gap: 12px; margin-top: 20px; }
+.document-row { display: flex; justify-content: space-between; gap: 16px; padding: 14px; border: 1px solid #e2e7f0; border-radius: 12px; }
+.document-row strong, .document-row span, .document-row small { display: block; }
+.document-row span, .document-row small { margin-top: 5px; color: #697386; font-size: 13px; overflow-wrap: anywhere; }
+.document-row small.failure-reason { color: #b64b4b; }
+.document-actions { display: grid; align-content: start; justify-items: end; gap: 8px; flex-shrink: 0; }
+.document-actions .status { color: #238653; font-weight: 700; }
+.search-form { display: grid; gap: 4px; margin-top: 24px; }
+.search-form button { justify-self: start; }
+.search-results { display: grid; gap: 10px; margin-top: 16px; }
+.search-result { padding: 14px; border-radius: 12px; background: #f7f8fc; }
+.search-result small { color: #697386; overflow-wrap: anywhere; }
+.search-result p { margin: 8px 0 0; line-height: 1.6; white-space: pre-wrap; }
+.answer-card { margin-top: 16px; padding: 16px; border-radius: 12px; background: #eef2ff; }
+.answer-card h3, .answer-card p { margin: 0 0 10px; }
+.answer-card p { line-height: 1.7; white-space: pre-wrap; }
+.answer-card small { display: block; color: #697386; overflow-wrap: anywhere; }
 
 @media (max-width: 760px) {
   .workspace-grid { grid-template-columns: 1fr; }
+  .document-row { flex-direction: column; }
+  .document-actions { justify-items: start; }
 }

@@ -67,6 +67,29 @@ public class JdbcWorkspaceRepository implements WorkspaceRepository {
         );
     }
 
+    @Override
+    public boolean isMember(Long workspaceId, Long userId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workspace_member WHERE workspace_id = ? AND user_id = ?",
+                Integer.class,
+                workspaceId,
+                userId
+        );
+        return count != null && count > 0;
+    }
+
+    @Override
+    public boolean isOwnerOrAdmin(Long workspaceId, Long userId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workspace_member WHERE workspace_id = ? AND user_id = ? "
+                        + "AND role IN ('OWNER', 'ADMIN')",
+                Integer.class,
+                workspaceId,
+                userId
+        );
+        return count != null && count > 0;
+    }
+
     private Instant toInstant(Timestamp timestamp) {
         return timestamp == null ? null : timestamp.toInstant();
     }

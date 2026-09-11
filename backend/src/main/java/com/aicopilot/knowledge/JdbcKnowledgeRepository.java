@@ -51,13 +51,29 @@ public class JdbcKnowledgeRepository implements KnowledgeRepository {
     }
 
     @Override
+    public java.util.Optional<KnowledgeBase> findKnowledgeBase(Long knowledgeBaseId) {
+        List<KnowledgeBase> bases = jdbcTemplate.query(
+                "SELECT id, workspace_id, name, description, status FROM knowledge_base WHERE id = ?",
+                (resultSet, rowNumber) -> new KnowledgeBase(
+                        resultSet.getLong("id"),
+                        resultSet.getLong("workspace_id"),
+                        resultSet.getString("name"),
+                        resultSet.getString("description"),
+                        resultSet.getString("status")
+                ),
+                knowledgeBaseId
+        );
+        return bases.stream().findFirst();
+    }
+
+    @Override
     public KnowledgeDocument saveDocument(KnowledgeDocument document) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement statement = connection.prepareStatement(
                     "INSERT INTO knowledge_document "
-                            + "(knowledge_base_id, original_filename, object_key, content_type, file_size, status) "
-                            + "VALUES (?, ?, ?, ?, ?, ?)",
+                            + "(knowledge_base_id, original_filename, object_key, content_type, file_size, status, processing_task_id) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     Statement.RETURN_GENERATED_KEYS
             );
             statement.setLong(1, document.knowledgeBaseId());
@@ -66,6 +82,7 @@ public class JdbcKnowledgeRepository implements KnowledgeRepository {
             statement.setString(4, document.contentType());
             statement.setLong(5, document.fileSize());
             statement.setString(6, document.status());
+            statement.setString(7, document.processingTaskId());
             return statement;
         }, keyHolder);
 
@@ -81,15 +98,20 @@ public class JdbcKnowledgeRepository implements KnowledgeRepository {
                 document.contentType(),
                 document.fileSize(),
                 document.status(),
-                Instant.now()
+                document.processingTaskId(),
+                Instant.now(),
+                null,
+                0
         );
     }
 
     @Override
     public List<KnowledgeDocument> findDocuments(Long knowledgeBaseId) {
         return jdbcTemplate.query(
-                "SELECT id, knowledge_base_id, original_filename, object_key, content_type, file_size, status, created_at "
-                        + "FROM knowledge_document WHERE knowledge_base_id = ? ORDER BY created_at, id",
+                "SELECT d.id, d.knowledge_base_id, d.original_filename, d.object_key, d.content_type, d.file_size, "
+                        + "d.status, d.processing_task_id, d.created_at, t.failure_reason, t.retry_count "
+                        + "FROM knowledge_document d LEFT JOIN document_processing_task t "
+                        + "ON t.task_id = d.processing_task_id WHERE d.knowledge_base_id = ? ORDER BY d.created_at, d.id",
                 (resultSet, rowNumber) -> new KnowledgeDocument(
                         resultSet.getLong("id"),
                         resultSet.getLong("knowledge_base_id"),
@@ -98,9 +120,41 @@ public class JdbcKnowledgeRepository implements KnowledgeRepository {
                         resultSet.getString("content_type"),
                         resultSet.getLong("file_size"),
                         resultSet.getString("status"),
-                        toInstant(resultSet.getTimestamp("created_at"))
+                        resultSet.getString("processing_task_id"),
+                        toInstant(resultSet.getTimestamp("created_at")),
+                        resultSet.getString("failure_reason"),
+                        resultSet.getInt("retry_count")
                 ),
                 knowledgeBaseId
+        );
+    }
+
+    @Override
+    public java.util.Optional<KnowledgeDocument> findDocument(Long knowledgeBaseId, Long documentId) {
+        List<KnowledgeDocument> documents = jdbcTemplate.query(
+                "SELECT d.id, d.knowledge_base_id, d.original_filename, d.object_key, d.content_type, d.file_size, "
+                        + "d.status, d.processing_task_id, d.created_at, t.failure_reason, t.retry_count "
+                        + "FROM knowledge_document d LEFT JOIN document_processing_task t "
+                        + "ON t.task_id = d.processing_task_id WHERE d.knowledge_base_id = ? AND d.id = ?",
+                (resultSet, rowNumber) -> new KnowledgeDocument(
+                        resultSet.getLong("id"), resultSet.getLong("knowledge_base_id"),
+                        resultSet.getString("original_filename"), resultSet.getString("object_key"),
+                        resultSet.getString("content_type"), resultSet.getLong("file_size"),
+                        resultSet.getString("status"), resultSet.getString("processing_task_id"),
+                        toInstant(resultSet.getTimestamp("created_at")),
+                        resultSet.getString("failure_reason"),
+                        resultSet.getInt("retry_count")
+                ),
+                knowledgeBaseId, documentId
+        );
+        return documents.stream().findFirst();
+    }
+
+    @Override
+    public void updateProcessingStatus(Long documentId, String processingTaskId, String status) {
+        jdbcTemplate.update(
+                "UPDATE knowledge_document SET processing_task_id = ?, status = ? WHERE id = ?",
+                processingTaskId, status, documentId
         );
     }
 

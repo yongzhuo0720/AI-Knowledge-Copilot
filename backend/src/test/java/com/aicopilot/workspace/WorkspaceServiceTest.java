@@ -1,6 +1,7 @@
 package com.aicopilot.workspace;
 
 import org.junit.jupiter.api.Test;
+import com.aicopilot.common.exception.AccessDeniedException;
 
 import java.time.Instant;
 import java.util.List;
@@ -51,5 +52,16 @@ class WorkspaceServiceTest {
         assertThat(response).containsExactly(
                 new WorkspaceMemberResponse(10L, 1L, "OWNER", joinedAt)
         );
+    }
+
+    @Test
+    void rejectsMemberManagementForNonAdmin() {
+        WorkspaceRepository repository = mock(WorkspaceRepository.class);
+        when(repository.isOwnerOrAdmin(10L, 2L)).thenReturn(false);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        new WorkspaceService(repository).addMember(2L, 10L, new AddWorkspaceMemberRequest(3L, null)))
+                .isInstanceOf(AccessDeniedException.class);
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).addMember(any());
     }
 }

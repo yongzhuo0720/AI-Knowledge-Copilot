@@ -9,4 +9,8 @@ public interface WorkspaceRepository {
     void addMember(WorkspaceMember member);
 
     List<WorkspaceMember> findMembers(Long workspaceId);
+
+    boolean isMember(Long workspaceId, Long userId);
+
+    boolean isOwnerOrAdmin(Long workspaceId, Long userId);
 }

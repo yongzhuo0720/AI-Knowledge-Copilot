@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -27,21 +28,28 @@ public class WorkspaceController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<WorkspaceResponse> create(@Valid @RequestBody CreateWorkspaceRequest request) {
-        return ApiResponse.success(workspaceService.create(request));
+    public ApiResponse<WorkspaceResponse> create(
+            @RequestHeader("X-User-Id") Long userId,
+            @Valid @RequestBody CreateWorkspaceRequest request
+    ) {
+        return ApiResponse.success(workspaceService.create(userId, request));
     }
 
     @PostMapping("/{workspaceId}/members")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<WorkspaceMemberResponse> addMember(
             @PathVariable Long workspaceId,
+            @RequestHeader("X-User-Id") Long userId,
             @Valid @RequestBody AddWorkspaceMemberRequest request
     ) {
-        return ApiResponse.success(workspaceService.addMember(workspaceId, request));
+        return ApiResponse.success(workspaceService.addMember(userId, workspaceId, request));
     }
 
     @GetMapping("/{workspaceId}/members")
-    public ApiResponse<List<WorkspaceMemberResponse>> findMembers(@PathVariable Long workspaceId) {
-        return ApiResponse.success(workspaceService.findMembers(workspaceId));
+    public ApiResponse<List<WorkspaceMemberResponse>> findMembers(
+            @PathVariable Long workspaceId,
+            @RequestHeader("X-User-Id") Long userId
+    ) {
+        return ApiResponse.success(workspaceService.findMembers(userId, workspaceId));
     }
 }
