@@ -85,6 +85,16 @@ textarea { min-height: 92px; resize: vertical; }
 .content-heading { align-items: center; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
 .knowledge-content { padding-top: 18px; }
 .knowledge-meta { display: flex; gap: 18px; margin-bottom: 18px; color: var(--muted); font-size: 12px; }
+.content-subtitle { display: block; margin-top: 7px; color: var(--muted); font-size: 11px; font-weight: 400; }
+.knowledge-tabs { display: flex; gap: 4px; overflow-x: auto; margin: 4px 0 18px; padding-bottom: 1px; border-bottom: 1px solid var(--line); }
+.knowledge-tab { position: relative; padding: 9px 12px; border: 0; background: transparent; color: var(--muted); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.knowledge-tab:hover { color: var(--primary-dark); }
+.knowledge-tab.active { color: var(--primary-dark); }
+.knowledge-tab.active::after { position: absolute; right: 9px; bottom: -1px; left: 9px; height: 2px; border-radius: 2px; background: var(--primary); content: ''; }
+.knowledge-overview-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 18px; }
+.knowledge-overview-strip > div { display: grid; gap: 5px; padding: 11px; border: 1px solid var(--line); border-radius: 10px; background: #fafbfe; }
+.knowledge-overview-strip span { color: #a0aabd; font-size: 8px; font-weight: 800; letter-spacing: .1em; }
+.knowledge-overview-strip strong { overflow: hidden; color: var(--ink); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .knowledge-selector { display: flex; align-items: center; gap: 10px; min-width: 260px; }
 .knowledge-selector select { min-width: 180px; padding-top: 8px; padding-bottom: 8px; }
 .status-pill { display: inline-flex; align-items: center; padding: 5px 9px; border-radius: 999px; background: #f1f3f8; color: #7b8497; font-size: 10px; font-weight: 800; letter-spacing: .04em; }
@@ -244,6 +254,7 @@ textarea { min-height: 92px; resize: vertical; }
   .content-panel, .auth-panel, .setup-panel { padding: 20px; }
   .knowledge-selector { min-width: 0; }
   .knowledge-selector select { min-width: 0; }
+  .knowledge-overview-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .upload-zone { flex-wrap: wrap; }
   .upload-zone > div:nth-child(2) { width: calc(100% - 52px); flex: initial; }
   .file-button, .upload-zone .primary-button { flex: 1; }
