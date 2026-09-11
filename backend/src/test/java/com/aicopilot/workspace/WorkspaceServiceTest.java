@@ -76,4 +76,13 @@ class WorkspaceServiceTest {
                 .hasMessage("user is not a member of this workspace");
         org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).findMembers(10L);
     }
+
+    @Test
+    void listsWorkspacesForAuthenticatedUser() {
+        WorkspaceRepository repository = mock(WorkspaceRepository.class);
+        when(repository.findByUserId(7L)).thenReturn(List.of(new Workspace(10L, "研发空间", 7L)));
+
+        assertThat(new WorkspaceService(repository).findForUser(7L))
+                .containsExactly(new WorkspaceResponse(10L, "研发空间", 7L));
+    }
 }

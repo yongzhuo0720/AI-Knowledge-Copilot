@@ -187,6 +187,7 @@ Authorization: Bearer <access-token>
 | `POST` | `/api/v1/users` | 注册 | 否 |
 | `POST` | `/api/v1/users/login` | 登录并获取 Token | 否 |
 | `POST` | `/api/v1/workspaces` | 创建工作空间 | 是 |
+| `GET` | `/api/v1/workspaces` | 获取当前用户可访问的工作空间 | 是 |
 | `GET` | `/api/v1/workspaces/{workspaceId}/members` | 查看成员 | 是 |
 | `POST` | `/api/v1/workspaces/{workspaceId}/members` | 添加成员 | OWNER/ADMIN |
 
@@ -195,6 +196,7 @@ Authorization: Bearer <access-token>
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `POST` | `/api/v1/knowledge-bases` | 创建知识库 |
+| `GET` | `/api/v1/knowledge-bases?workspaceId={workspaceId}` | 获取工作空间下的知识库 |
 | `POST` | `/api/v1/knowledge-bases/{id}/documents/upload` | 上传文档 |
 | `GET` | `/api/v1/knowledge-bases/{id}/documents` | 获取文档列表 |
 | `GET` | `/api/v1/knowledge-bases/{id}/documents/{documentId}/processing-status` | 刷新解析状态 |
