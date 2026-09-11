@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import jakarta.servlet.http.HttpServletRequest;
+import com.aicopilot.user.AuthenticationInterceptor;
 
 import java.util.List;
 
@@ -30,36 +32,40 @@ public class ConversationController {
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<ConversationSession> createSession(
             @PathVariable Long knowledgeBaseId,
-            @RequestHeader("X-User-Id") Long userId,
+            HttpServletRequest httpRequest,
             @Valid @RequestBody CreateConversationRequest request
     ) {
-        return ApiResponse.success(conversationService.createSession(userId, knowledgeBaseId, request));
+        return ApiResponse.success(conversationService.createSession(authenticatedUserId(httpRequest), knowledgeBaseId, request));
     }
 
     @GetMapping
     public ApiResponse<List<ConversationSession>> findSessions(
             @PathVariable Long knowledgeBaseId,
-            @RequestHeader("X-User-Id") Long userId
+            HttpServletRequest httpRequest
     ) {
-        return ApiResponse.success(conversationService.findSessions(userId, knowledgeBaseId));
+        return ApiResponse.success(conversationService.findSessions(authenticatedUserId(httpRequest), knowledgeBaseId));
     }
 
     @GetMapping("/{sessionId}/messages")
     public ApiResponse<List<ConversationMessage>> findMessages(
             @PathVariable Long knowledgeBaseId,
             @PathVariable Long sessionId,
-            @RequestHeader("X-User-Id") Long userId
+            HttpServletRequest httpRequest
     ) {
-        return ApiResponse.success(conversationService.findMessages(userId, knowledgeBaseId, sessionId));
+        return ApiResponse.success(conversationService.findMessages(authenticatedUserId(httpRequest), knowledgeBaseId, sessionId));
     }
 
     @PostMapping("/{sessionId}/messages")
     public ApiResponse<ConversationReply> ask(
             @PathVariable Long knowledgeBaseId,
             @PathVariable Long sessionId,
-            @RequestHeader("X-User-Id") Long userId,
+            HttpServletRequest httpRequest,
             @Valid @RequestBody CreateMessageRequest request
     ) {
-        return ApiResponse.success(conversationService.ask(userId, knowledgeBaseId, sessionId, request));
+        return ApiResponse.success(conversationService.ask(authenticatedUserId(httpRequest), knowledgeBaseId, sessionId, request));
+    }
+
+    private Long authenticatedUserId(HttpServletRequest request) {
+        return (Long) request.getAttribute(AuthenticationInterceptor.AUTHENTICATED_USER_ID);
     }
 }

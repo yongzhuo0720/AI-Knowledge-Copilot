@@ -8,6 +8,7 @@ import {
   listDocuments,
   listConversationMessages,
   listConversations,
+  login,
   reparseDocument,
   refreshDocumentProcessingStatus,
   retryDocumentProcessing,
@@ -36,6 +37,32 @@ const answer = ref<KnowledgeAnswer | null>(null)
 const sessions = ref<ConversationSession[]>([])
 const currentSession = ref<ConversationSession | null>(null)
 const messages = ref<ConversationMessage[]>([])
+const email = ref('')
+const password = ref('')
+const loggedIn = ref(Boolean(localStorage.getItem('accessToken')))
+
+async function signIn() {
+  loading.value = true
+  try {
+    const response = await login(email.value, password.value)
+    localStorage.setItem('accessToken', response.data.accessToken)
+    userId.value = String(response.data.user.id)
+    loggedIn.value = true
+    message.value = `已登录：${response.data.user.username}`
+  } catch (error) {
+    message.value = error instanceof Error ? error.message : '登录失败'
+  } finally {
+    loading.value = false
+  }
+}
+
+function signOut() {
+  localStorage.removeItem('accessToken')
+  loggedIn.value = false
+  knowledgeBase.value = null
+  sessions.value = []
+  messages.value = []
+}
 
 async function create() {
   message.value = ''
@@ -199,10 +226,20 @@ async function retry(documentId: number) {
       <p class="summary">创建知识库后上传文档，系统会将文件保存到对象存储并提交 AI 解析。</p>
     </header>
 
-    <section class="workspace-grid">
+    <section v-if="!loggedIn" class="panel auth-panel">
+      <h2>登录后继续</h2>
+      <form @submit.prevent="signIn">
+        <label>邮箱<input v-model="email" type="email" required placeholder="alice@example.com" /></label>
+        <label>密码<input v-model="password" type="password" required /></label>
+        <button :disabled="loading" type="submit">登录</button>
+      </form>
+      <p class="message">业务接口使用 Bearer Token 认证。</p>
+    </section>
+
+    <section v-else class="workspace-grid">
       <form class="panel" @submit.prevent="create">
         <h2>创建知识库</h2>
-        <label>当前用户 ID<input v-model="userId" type="number" min="1" required /></label>
+        <div class="auth-toolbar"><span>已认证用户 #{{ userId }}</span><button class="secondary" type="button" @click="signOut">退出登录</button></div>
         <label>工作空间 ID<input v-model="workspaceId" type="number" min="1" required /></label>
         <label>名称<input v-model="name" maxlength="128" required placeholder="例如：研发规范" /></label>
         <label>描述<textarea v-model="description" maxlength="500" placeholder="可选" /></label>

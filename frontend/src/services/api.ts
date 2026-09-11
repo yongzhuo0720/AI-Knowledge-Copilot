@@ -60,8 +60,25 @@ export interface ConversationReply {
   assistantMessage: ConversationMessage
 }
 
+export interface LoginResponse {
+  accessToken: string
+  user: { id: number; username: string; email: string; status: string }
+}
+
 function userHeaders(userId: number): HeadersInit {
-  return { 'X-User-Id': String(userId) }
+  void userId
+  const token = localStorage.getItem('accessToken')
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+export async function login(email: string, password: string): Promise<ApiResponse<LoginResponse>> {
+  const response = await fetch('/api/v1/users/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  })
+  if (!response.ok) throw new Error(`登录失败：${response.status}`)
+  return response.json() as Promise<ApiResponse<LoginResponse>>
 }
 
 export async function getHealth(): Promise<ApiResponse<{ status: string }>> {

@@ -12,6 +12,12 @@ import org.springframework.web.bind.MissingRequestHeaderException;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(AuthenticationException.class)
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    public ApiResponse<Void> handleAuthenticationException(AuthenticationException exception) {
+        return new ApiResponse<>("AUTHENTICATION_REQUIRED", exception.getMessage(), null);
+    }
+
     @ExceptionHandler(AccessDeniedException.class)
     @ResponseStatus(HttpStatus.FORBIDDEN)
     public ApiResponse<Void> handleAccessDeniedException(AccessDeniedException exception) {

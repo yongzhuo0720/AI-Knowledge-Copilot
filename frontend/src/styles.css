@@ -107,6 +107,8 @@ h1 {
   margin: 0 0 24px;
   font-size: 22px;
 }
+.auth-panel { max-width: 520px; margin-bottom: 24px; }
+.auth-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; color: #697386; font-size: 14px; }
 
 label {
   display: grid;

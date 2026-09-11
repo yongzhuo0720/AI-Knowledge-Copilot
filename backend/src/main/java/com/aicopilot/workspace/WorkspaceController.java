@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import jakarta.servlet.http.HttpServletRequest;
+import com.aicopilot.user.AuthenticationInterceptor;
 
 import java.util.List;
 
@@ -29,27 +31,31 @@ public class WorkspaceController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<WorkspaceResponse> create(
-            @RequestHeader("X-User-Id") Long userId,
+            HttpServletRequest httpRequest,
             @Valid @RequestBody CreateWorkspaceRequest request
     ) {
-        return ApiResponse.success(workspaceService.create(userId, request));
+        return ApiResponse.success(workspaceService.create(authenticatedUserId(httpRequest), request));
     }
 
     @PostMapping("/{workspaceId}/members")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<WorkspaceMemberResponse> addMember(
             @PathVariable Long workspaceId,
-            @RequestHeader("X-User-Id") Long userId,
+            HttpServletRequest httpRequest,
             @Valid @RequestBody AddWorkspaceMemberRequest request
     ) {
-        return ApiResponse.success(workspaceService.addMember(userId, workspaceId, request));
+        return ApiResponse.success(workspaceService.addMember(authenticatedUserId(httpRequest), workspaceId, request));
     }
 
     @GetMapping("/{workspaceId}/members")
     public ApiResponse<List<WorkspaceMemberResponse>> findMembers(
             @PathVariable Long workspaceId,
-            @RequestHeader("X-User-Id") Long userId
+            HttpServletRequest httpRequest
     ) {
-        return ApiResponse.success(workspaceService.findMembers(userId, workspaceId));
+        return ApiResponse.success(workspaceService.findMembers(authenticatedUserId(httpRequest), workspaceId));
+    }
+
+    private Long authenticatedUserId(HttpServletRequest request) {
+        return (Long) request.getAttribute(AuthenticationInterceptor.AUTHENTICATED_USER_ID);
     }
 }

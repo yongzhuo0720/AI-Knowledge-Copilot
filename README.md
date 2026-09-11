@@ -5,8 +5,9 @@
 ## 当前功能
 
 - 用户、工作空间与知识库基础管理。
-- 知识库接口按工作空间成员隔离，业务请求需携带 `X-User-Id` 请求头。
+- 知识库接口按工作空间成员隔离，业务请求需携带 Bearer Token。
 - 会话历史按用户和知识库持久化，问答消息会保存回答引用并将历史上下文传给 AI Service。
+- 用户可通过登录接口获取 Redis-backed Bearer Token，工作区、知识库和会话接口统一使用该 Token 认证。
 - 从前端选择真实文件并以 multipart 上传。
 - 后端将原文件保存至 MinIO 的 `ai-copilot` bucket，并将文档元数据保存至 MySQL。
 - 上传后自动创建 AI 解析任务；页面可查看文档列表、任务 ID 与最新解析状态。
@@ -54,10 +55,10 @@ AI Service 将任务状态、失败原因、重试次数和任务参数持久化
 
 ## 主要接口
 
-除健康检查、用户注册外，工作空间和知识库业务接口均需要请求头：
+除健康检查、用户注册和登录外，工作空间、知识库和会话业务接口均需要登录后获得的请求头：
 
 ```http
-X-User-Id: 16
+Authorization: Bearer <access-token>
 ```
 
 后端会校验用户是否属于目标工作空间；非成员访问返回 `403 ACCESS_DENIED`。
@@ -65,6 +66,7 @@ X-User-Id: 16
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | `POST` | `/api/v1/knowledge-bases` | 创建知识库 |
+| `POST` | `/api/v1/users/login` | 登录并获取 Bearer Token |
 | `POST` | `/api/v1/knowledge-bases/{knowledgeBaseId}/documents/upload` | 上传文件并提交解析 |
 | `GET` | `/api/v1/knowledge-bases/{knowledgeBaseId}/documents` | 获取文档列表 |
 | `GET` | `/api/v1/knowledge-bases/{knowledgeBaseId}/documents/{documentId}/processing-status` | 查询并同步解析状态 |

@@ -40,4 +40,15 @@ public class JdbcUserRepository implements UserRepository {
         }
         return new User(id.longValue(), user.username(), user.email(), user.passwordHash(), user.status());
     }
+
+    @Override
+    public java.util.Optional<User> findByEmail(String email) {
+        return jdbcTemplate.query(
+                "SELECT id, username, email, password_hash, status FROM app_user WHERE email = ?",
+                (resultSet, rowNumber) -> new User(
+                        resultSet.getLong("id"), resultSet.getString("username"), resultSet.getString("email"),
+                        resultSet.getString("password_hash"), resultSet.getString("status")
+                ), email
+        ).stream().findFirst();
+    }
 }
