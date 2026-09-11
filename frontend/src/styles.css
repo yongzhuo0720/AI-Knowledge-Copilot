@@ -133,7 +133,49 @@ textarea { min-height: 92px; resize: vertical; }
 .answer-icon { width: 22px; height: 22px; border-radius: 7px; font-size: 12px; }
 .answer-card small { display: block; margin-top: 9px; }
 .result-label { margin-bottom: -2px; color: var(--muted); font-size: 11px; }
+.app-shell { display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 100vh; background: #f6f8fc; }
+.app-sidebar { position: sticky; top: 0; display: flex; flex-direction: column; min-height: 100vh; padding: 24px 14px 18px; border-right: 1px solid var(--line); background: #fff; }
+.sidebar-brand { display: inline-flex; align-items: center; gap: 10px; padding: 0 10px; color: var(--ink); text-decoration: none; }
+.sidebar-brand > span:last-child { display: grid; gap: 2px; }
+.sidebar-brand strong { font-size: 13px; letter-spacing: -.02em; }
+.sidebar-brand small { color: var(--muted); font-size: 10px; }
+.workspace-picker { display: grid; gap: 8px; margin: 30px 4px 26px; padding: 13px; border: 1px solid var(--line); border-radius: 13px; background: #fafbfe; }
+.workspace-picker select { padding: 9px 30px 9px 10px; border-color: #dfe4ef; font-size: 12px; font-weight: 650; }
+.workspace-picker small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-label { color: #a0aabd; font-size: 9px; font-weight: 800; letter-spacing: .14em; }
+.sidebar-error { color: var(--danger) !important; white-space: normal !important; }
+.app-navigation { display: grid; gap: 4px; }
+.nav-group-label { margin-top: 18px; }
+.nav-item { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 10px; border-radius: 9px; color: #68748d; font-size: 12px; font-weight: 650; text-decoration: none; transition: background .18s, color .18s; }
+.nav-item:hover, .nav-item.router-link-active { background: #eef0ff; color: var(--primary-dark); }
+.nav-icon { display: inline-grid; place-items: center; width: 20px; color: #8994aa; font-size: 15px; }
+.nav-item.router-link-active .nav-icon { color: var(--primary); }
+.nav-item-disabled { cursor: not-allowed; opacity: .56; }
+.nav-item-disabled:hover { background: transparent; color: #68748d; }
+.nav-item-disabled small { margin-left: auto; color: #a0aabd; font-size: 9px; font-weight: 500; }
+.sidebar-footer { display: grid; gap: 7px; margin-top: auto; padding: 14px 10px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.service-status { display: inline-flex; align-items: center; gap: 7px; color: var(--success); font-weight: 650; }
+.service-dot { width: 7px; height: 7px; border-radius: 50%; background: #35aa70; box-shadow: 0 0 0 3px #e5f6ed; }
+.app-main { min-width: 0; }
+.app-topbar { display: flex; align-items: center; justify-content: space-between; min-height: 72px; padding: 0 36px; border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, .82); }
+.app-topbar > div:first-child { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 12px; }
+.app-topbar > div:first-child strong { color: var(--ink); font-size: 13px; }
+.breadcrumb-root { color: #a0aabd; font-size: 9px; font-weight: 800; letter-spacing: .14em; }
+.breadcrumb-separator { color: #c1c8d6; }
+.app-user-menu { display: flex; align-items: center; gap: 10px; }
+.app-user-copy { display: grid; gap: 2px; justify-items: end; }
+.app-user-copy strong { color: var(--ink); font-size: 12px; }
+.app-user-copy small { color: var(--muted); font-size: 10px; }
+.app-page { min-width: 0; }
 @media (max-width: 900px) {
+  .app-shell { display: block; }
+  .app-sidebar { position: static; min-height: 0; padding: 18px 16px 14px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .workspace-picker { max-width: 360px; margin: 18px 0; }
+  .app-navigation { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .app-navigation > .sidebar-label { grid-column: 1 / -1; }
+  .nav-group-label { margin-top: 12px; }
+  .sidebar-footer { display: none; }
+  .app-topbar { min-height: 62px; padding: 0 22px; }
   .auth-layout { grid-template-columns: 1fr; gap: 34px; max-width: 540px; }
   .auth-panel { order: -1; }
   .auth-intro h2 { margin-bottom: 28px; font-size: 48px; }
@@ -142,6 +184,9 @@ textarea { min-height: 92px; resize: vertical; }
   .side-message { grid-column: 1 / -1; }
 }
 @media (max-width: 620px) {
+  .app-topbar { align-items: start; gap: 12px; padding: 14px 16px; }
+  .app-user-copy { display: none; }
+  .app-topbar .ghost-button { padding-right: 0; }
   .workspace-shell { padding: 18px 16px 40px; }
   .topbar { margin-bottom: 36px; }
   .user-name { display: none; }

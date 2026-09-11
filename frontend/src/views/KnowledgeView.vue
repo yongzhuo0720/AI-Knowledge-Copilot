@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 import {
   askConversation,
@@ -65,8 +64,34 @@ const message = ref('')
 const loading = ref(false)
 
 onMounted(() => {
+  window.addEventListener('aicopilot-auth-changed', syncAuthState)
+  window.addEventListener('aicopilot-workspace-changed', handleGlobalWorkspaceChange)
   if (loggedIn.value) void restoreWorkspaceContext()
 })
+
+onBeforeUnmount(() => {
+  window.removeEventListener('aicopilot-auth-changed', syncAuthState)
+  window.removeEventListener('aicopilot-workspace-changed', handleGlobalWorkspaceChange)
+})
+
+function syncAuthState() {
+  currentUser.value = readStoredUser()
+  userId.value = currentUser.value ? String(currentUser.value.id) : ''
+  loggedIn.value = Boolean(localStorage.getItem('accessToken') && currentUser.value)
+  if (loggedIn.value) void restoreWorkspaceContext()
+  else {
+    workspaces.value = []; knowledgeBases.value = []; workspaceId.value = ''; knowledgeBaseId.value = ''
+    knowledgeBase.value = null; documents.value = []; sessions.value = []; messages.value = []; currentSession.value = null
+  }
+}
+
+function handleGlobalWorkspaceChange(event: Event) {
+  const workspaceEvent = event as CustomEvent<{ workspaceId?: string }>
+  const nextWorkspaceId = workspaceEvent.detail?.workspaceId
+  if (!loggedIn.value || !nextWorkspaceId || nextWorkspaceId === workspaceId.value) return
+  workspaceId.value = nextWorkspaceId
+  void handleWorkspaceChange(false)
+}
 
 function showError(error: unknown, fallback: string) {
   message.value = error instanceof Error ? error.message : fallback
@@ -90,7 +115,7 @@ async function submitAuth() {
     localStorage.setItem('currentUser', JSON.stringify(response.data.user))
     loggedIn.value = true
     message.value = `欢迎回来，${response.data.user.username}`
-    await restoreWorkspaceContext()
+    window.dispatchEvent(new Event('aicopilot-auth-changed'))
   } catch (error) { showError(error, authMode.value === 'login' ? '登录失败' : '注册失败')
   } finally { loading.value = false }
 }
@@ -100,9 +125,11 @@ function switchAuthMode(mode: AuthMode) { authMode.value = mode; message.value =
 function signOut() {
   localStorage.removeItem('accessToken')
   localStorage.removeItem('currentUser')
+  localStorage.removeItem('activeWorkspaceId')
   currentUser.value = null; userId.value = ''; loggedIn.value = false
   workspaces.value = []; knowledgeBases.value = []; workspaceId.value = ''; knowledgeBaseId.value = ''
   knowledgeBase.value = null; documents.value = []; sessions.value = []; messages.value = []; currentSession.value = null
+  window.dispatchEvent(new Event('aicopilot-auth-changed'))
 }
 
 async function restoreWorkspaceContext() {
@@ -111,7 +138,10 @@ async function restoreWorkspaceContext() {
   try {
     const response = await listWorkspaces(Number(userId.value))
     workspaces.value = response.data
-    if (!workspaceId.value && workspaces.value.length) workspaceId.value = String(workspaces.value[0].id)
+    const storedWorkspaceId = localStorage.getItem('activeWorkspaceId')
+    if (storedWorkspaceId && workspaces.value.some((item) => String(item.id) === storedWorkspaceId)) workspaceId.value = storedWorkspaceId
+    else if (!workspaceId.value && workspaces.value.length) workspaceId.value = String(workspaces.value[0].id)
+    if (workspaceId.value) localStorage.setItem('activeWorkspaceId', workspaceId.value)
     if (workspaceId.value) await loadKnowledgeBases()
   } catch (error) { showError(error, '恢复工作空间失败')
   } finally { loading.value = false }
@@ -128,13 +158,21 @@ async function loadKnowledgeBases() {
   }
 }
 
-async function handleWorkspaceChange() {
+async function handleWorkspaceChange(notifyShell = true) {
+  if (workspaceId.value) {
+    localStorage.setItem('activeWorkspaceId', workspaceId.value)
+    if (notifyShell) window.dispatchEvent(new CustomEvent('aicopilot-workspace-changed', { detail: { workspaceId: workspaceId.value } }))
+  }
   knowledgeBase.value = null
   knowledgeBaseId.value = ''
   documents.value = []
   sessions.value = []
   messages.value = []
   await loadKnowledgeBases()
+}
+
+function handleWorkspaceSelect() {
+  void handleWorkspaceChange()
 }
 
 async function selectKnowledgeBase(item: KnowledgeBase) {
@@ -157,11 +195,14 @@ async function createWorkspace() {
   try {
     const response = await createWorkspaceApi(Number(userId.value), workspaceName.value.trim())
     workspaceId.value = String(response.data.id)
+    localStorage.setItem('activeWorkspaceId', workspaceId.value)
     workspaces.value = [...workspaces.value, response.data]
     knowledgeBases.value = []
     knowledgeBase.value = null
     knowledgeBaseId.value = ''
     message.value = `工作空间已创建：${response.data.name}（ID ${response.data.id}）`
+    window.dispatchEvent(new Event('aicopilot-workspaces-changed'))
+    await handleWorkspaceChange(false)
   } catch (error) { showError(error, '创建工作空间失败')
   } finally { loading.value = false }
 }
@@ -264,7 +305,6 @@ async function retry(documentId: number) {
 
 <template>
   <main class="workspace-shell">
-    <nav class="topbar"><RouterLink class="brand" to="/"><span class="brand-mark">✦</span><span>AI Knowledge Copilot</span></RouterLink><div v-if="loggedIn" class="user-menu"><span class="user-avatar">{{ currentUser?.username.slice(0, 1).toUpperCase() }}</span><span class="user-name">{{ currentUser?.username }}</span><button class="ghost-button" type="button" @click="signOut">退出登录</button></div></nav>
     <header class="workspace-header"><div><p class="eyebrow">KNOWLEDGE WORKSPACE</p><h1>把团队知识，整理成可协作的资产。</h1><p class="summary">上传资料，交给 AI 解析；用自然语言检索，并保留每次回答的来源。</p></div><div v-if="loggedIn" class="secure-badge"><span class="secure-dot" /> 已安全连接</div></header>
 
     <section v-if="!loggedIn" class="auth-layout">
@@ -273,7 +313,7 @@ async function retry(documentId: number) {
     </section>
 
     <section v-else class="workspace-grid">
-      <aside class="setup-column"><section class="panel setup-panel"><div class="section-heading"><div><p class="eyebrow">01 · SETUP</p><h2>准备工作空间</h2></div><span class="step-number">01</span></div><p class="section-copy">选择已有空间，或创建一个新的工作空间。</p><label>当前工作空间<select v-model="workspaceId" :disabled="loading || !workspaces.length" @change="handleWorkspaceChange"><option value="" disabled>{{ workspaces.length ? '请选择工作空间' : '暂时没有工作空间' }}</option><option v-for="workspace in workspaces" :key="workspace.id" :value="String(workspace.id)">{{ workspace.name }} · #{{ workspace.id }}</option></select></label><div class="inline-create"><label>新空间名称<input v-model="workspaceName" maxlength="128" placeholder="例如：产品研发部" /></label><button class="secondary-button" :disabled="loading || !workspaceName.trim()" type="button" @click="createWorkspace">一键创建</button></div></section>
+      <aside class="setup-column"><section class="panel setup-panel"><div class="section-heading"><div><p class="eyebrow">01 · SETUP</p><h2>准备工作空间</h2></div><span class="step-number">01</span></div><p class="section-copy">选择已有空间，或创建一个新的工作空间。</p><label>当前工作空间<select v-model="workspaceId" :disabled="loading || !workspaces.length" @change="handleWorkspaceSelect"><option value="" disabled>{{ workspaces.length ? '请选择工作空间' : '暂时没有工作空间' }}</option><option v-for="workspace in workspaces" :key="workspace.id" :value="String(workspace.id)">{{ workspace.name }} · #{{ workspace.id }}</option></select></label><div class="inline-create"><label>新空间名称<input v-model="workspaceName" maxlength="128" placeholder="例如：产品研发部" /></label><button class="secondary-button" :disabled="loading || !workspaceName.trim()" type="button" @click="createWorkspace">一键创建</button></div></section>
       <form class="panel setup-panel" @submit.prevent="create"><div class="section-heading"><div><p class="eyebrow">02 · CREATE</p><h2>创建知识库</h2></div><span class="step-number">02</span></div><p class="section-copy">为资料集合设置一个清晰的名字和描述。</p><label>知识库名称<input v-model="name" maxlength="128" required placeholder="例如：研发规范" /></label><label>描述<textarea v-model="description" maxlength="500" placeholder="可选：这套资料主要解决什么问题？" /></label><button class="primary-button wide-button" :disabled="loading || !workspaceId || !name.trim()" type="submit">{{ loading ? '处理中…' : '创建知识库' }}</button></form><p v-if="message" class="message side-message" :class="{ 'message-error': message.includes('失败') || message.includes('错误') }">{{ message }}</p></aside>
 
       <section class="panel content-panel"><div class="section-heading content-heading"><div><p class="eyebrow">YOUR KNOWLEDGE</p><h2>{{ knowledgeBase ? knowledgeBase.name : '当前知识库' }}</h2></div><div class="knowledge-selector"><select v-model="knowledgeBaseId" :disabled="loading || !knowledgeBases.length" @change="handleKnowledgeBaseChange"><option value="" disabled>{{ knowledgeBases.length ? '选择知识库' : '暂无知识库' }}</option><option v-for="item in knowledgeBases" :key="item.id" :value="String(item.id)">{{ item.name }}</option></select><span v-if="knowledgeBase" class="status-pill active">{{ knowledgeBase.status }}</span></div></div>
