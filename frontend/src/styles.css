@@ -62,8 +62,9 @@ h1 { margin-bottom: 0; font-size: clamp(36px, 6vw, 62px); line-height: 1.08; let
 .auth-tabs button.active { color: var(--primary-dark); }
 .auth-tabs button.active::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; background: var(--primary); content: ''; }
 label { display: grid; gap: 8px; margin-bottom: 16px; color: var(--muted); font-size: 13px; }
-input, textarea { width: 100%; padding: 12px 13px; border: 1px solid #d9dfeb; border-radius: 10px; outline: none; background: #fff; color: var(--ink); }
-input:focus, textarea:focus { border-color: #8e9bea; box-shadow: 0 0 0 3px #eef0ff; }
+input, textarea, select { width: 100%; padding: 12px 13px; border: 1px solid #d9dfeb; border-radius: 10px; outline: none; background: #fff; color: var(--ink); }
+select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, #8792ab 50%), linear-gradient(135deg, #8792ab 50%, transparent 50%); background-position: calc(100% - 17px) 17px, calc(100% - 12px) 17px; background-repeat: no-repeat; background-size: 5px 5px, 5px 5px; padding-right: 32px; }
+input:focus, textarea:focus, select:focus { border-color: #8e9bea; box-shadow: 0 0 0 3px #eef0ff; }
 textarea { min-height: 92px; resize: vertical; }
 .wide-button { width: 100%; }
 .form-hint, .section-copy, .message { color: var(--muted); font-size: 12px; line-height: 1.6; }
@@ -84,6 +85,8 @@ textarea { min-height: 92px; resize: vertical; }
 .content-heading { align-items: center; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
 .knowledge-content { padding-top: 18px; }
 .knowledge-meta { display: flex; gap: 18px; margin-bottom: 18px; color: var(--muted); font-size: 12px; }
+.knowledge-selector { display: flex; align-items: center; gap: 10px; min-width: 260px; }
+.knowledge-selector select { min-width: 180px; padding-top: 8px; padding-bottom: 8px; }
 .status-pill { display: inline-flex; align-items: center; padding: 5px 9px; border-radius: 999px; background: #f1f3f8; color: #7b8497; font-size: 10px; font-weight: 800; letter-spacing: .04em; }
 .status-pill.active, .status-completed { background: #eaf8f1; color: var(--success); }
 .status-processing, .status-accepted, .status-retrying { background: #fff6e5; color: #bd7a16; }
@@ -132,6 +135,7 @@ textarea { min-height: 92px; resize: vertical; }
 .result-label { margin-bottom: -2px; color: var(--muted); font-size: 11px; }
 @media (max-width: 900px) {
   .auth-layout { grid-template-columns: 1fr; gap: 34px; max-width: 540px; }
+  .auth-panel { order: -1; }
   .auth-intro h2 { margin-bottom: 28px; font-size: 48px; }
   .workspace-grid { grid-template-columns: 1fr; }
   .setup-column { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -147,6 +151,8 @@ textarea { min-height: 92px; resize: vertical; }
   .secure-badge { margin-top: 18px; }
   .setup-column { grid-template-columns: 1fr; }
   .content-panel, .auth-panel, .setup-panel { padding: 20px; }
+  .knowledge-selector { min-width: 0; }
+  .knowledge-selector select { min-width: 0; }
   .upload-zone { flex-wrap: wrap; }
   .upload-zone > div:nth-child(2) { width: calc(100% - 52px); flex: initial; }
   .file-button, .upload-zone .primary-button { flex: 1; }

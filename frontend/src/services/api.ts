@@ -117,6 +117,11 @@ export async function createWorkspace(userId: number, name: string): Promise<Api
   return parseResponse<Workspace>(response, '创建工作空间失败')
 }
 
+export async function listWorkspaces(userId: number): Promise<ApiResponse<Workspace[]>> {
+  const response = await fetch('/api/v1/workspaces', { headers: userHeaders(userId) })
+  return parseResponse<Workspace[]>(response, '获取工作空间失败')
+}
+
 export async function createKnowledgeBase(
   userId: number,
   workspaceId: number,
@@ -129,6 +134,11 @@ export async function createKnowledgeBase(
     body: JSON.stringify({ workspaceId, name, description }),
   })
   return parseResponse<KnowledgeBase>(response, '创建知识库失败')
+}
+
+export async function listKnowledgeBases(userId: number, workspaceId: number): Promise<ApiResponse<KnowledgeBase[]>> {
+  const response = await fetch(`/api/v1/knowledge-bases?workspaceId=${workspaceId}`, { headers: userHeaders(userId) })
+  return parseResponse<KnowledgeBase[]>(response, '获取知识库失败')
 }
 
 export async function registerDocument(

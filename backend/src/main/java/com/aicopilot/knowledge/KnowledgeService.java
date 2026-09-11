@@ -72,6 +72,14 @@ public class KnowledgeService {
         return KnowledgeBaseResponse.from(knowledgeBase);
     }
 
+    @Transactional(readOnly = true)
+    public List<KnowledgeBaseResponse> findKnowledgeBases(Long userId, Long workspaceId) {
+        authorizeWorkspace(workspaceId, userId);
+        return knowledgeRepository.findKnowledgeBases(workspaceId).stream()
+                .map(KnowledgeBaseResponse::from)
+                .toList();
+    }
+
     @Transactional
     public KnowledgeDocumentResponse registerDocument(Long knowledgeBaseId, RegisterDocumentRequest request) {
         return registerDocument(null, knowledgeBaseId, request);

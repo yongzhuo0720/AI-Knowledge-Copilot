@@ -37,6 +37,11 @@ public class WorkspaceController {
         return ApiResponse.success(workspaceService.create(authenticatedUserId(httpRequest), request));
     }
 
+    @GetMapping
+    public ApiResponse<List<WorkspaceResponse>> findForUser(HttpServletRequest httpRequest) {
+        return ApiResponse.success(workspaceService.findForUser(authenticatedUserId(httpRequest)));
+    }
+
     @PostMapping("/{workspaceId}/members")
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<WorkspaceMemberResponse> addMember(

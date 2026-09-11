@@ -8,6 +8,8 @@ public interface KnowledgeRepository {
 
     java.util.Optional<KnowledgeBase> findKnowledgeBase(Long knowledgeBaseId);
 
+    List<KnowledgeBase> findKnowledgeBases(Long workspaceId);
+
     KnowledgeDocument saveDocument(KnowledgeDocument document);
 
     List<KnowledgeDocument> findDocuments(Long knowledgeBaseId);

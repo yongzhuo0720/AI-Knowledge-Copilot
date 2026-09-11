@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 
 import {
@@ -10,6 +10,8 @@ import {
   listConversationMessages,
   listConversations,
   listDocuments,
+  listKnowledgeBases,
+  listWorkspaces,
   login,
   registerUser,
   reparseDocument,
@@ -24,6 +26,7 @@ import {
   type KnowledgeDocument,
   type KnowledgeRetrievalChunk,
   type LoginResponse,
+  type Workspace,
 } from '@/services/api'
 
 type AuthUser = LoginResponse['user']
@@ -43,6 +46,9 @@ const email = ref('')
 const password = ref('')
 const username = ref('')
 const workspaceId = ref('')
+const workspaces = ref<Workspace[]>([])
+const knowledgeBases = ref<KnowledgeBase[]>([])
+const knowledgeBaseId = ref('')
 const workspaceName = ref('我的工作空间')
 const name = ref('')
 const description = ref('')
@@ -57,6 +63,10 @@ const currentSession = ref<ConversationSession | null>(null)
 const messages = ref<ConversationMessage[]>([])
 const message = ref('')
 const loading = ref(false)
+
+onMounted(() => {
+  if (loggedIn.value) void restoreWorkspaceContext()
+})
 
 function showError(error: unknown, fallback: string) {
   message.value = error instanceof Error ? error.message : fallback
@@ -80,6 +90,7 @@ async function submitAuth() {
     localStorage.setItem('currentUser', JSON.stringify(response.data.user))
     loggedIn.value = true
     message.value = `欢迎回来，${response.data.user.username}`
+    await restoreWorkspaceContext()
   } catch (error) { showError(error, authMode.value === 'login' ? '登录失败' : '注册失败')
   } finally { loading.value = false }
 }
@@ -90,7 +101,54 @@ function signOut() {
   localStorage.removeItem('accessToken')
   localStorage.removeItem('currentUser')
   currentUser.value = null; userId.value = ''; loggedIn.value = false
+  workspaces.value = []; knowledgeBases.value = []; workspaceId.value = ''; knowledgeBaseId.value = ''
   knowledgeBase.value = null; documents.value = []; sessions.value = []; messages.value = []; currentSession.value = null
+}
+
+async function restoreWorkspaceContext() {
+  if (!userId.value) return
+  loading.value = true
+  try {
+    const response = await listWorkspaces(Number(userId.value))
+    workspaces.value = response.data
+    if (!workspaceId.value && workspaces.value.length) workspaceId.value = String(workspaces.value[0].id)
+    if (workspaceId.value) await loadKnowledgeBases()
+  } catch (error) { showError(error, '恢复工作空间失败')
+  } finally { loading.value = false }
+}
+
+async function loadKnowledgeBases() {
+  if (!workspaceId.value) return
+  const response = await listKnowledgeBases(Number(userId.value), Number(workspaceId.value))
+  knowledgeBases.value = response.data
+  if (!knowledgeBases.value.some((item) => item.id === knowledgeBase.value?.id)) {
+    knowledgeBaseId.value = knowledgeBases.value.length ? String(knowledgeBases.value[0].id) : ''
+    if (knowledgeBases.value.length) await selectKnowledgeBase(knowledgeBases.value[0])
+    else { knowledgeBase.value = null; documents.value = []; sessions.value = [] }
+  }
+}
+
+async function handleWorkspaceChange() {
+  knowledgeBase.value = null
+  knowledgeBaseId.value = ''
+  documents.value = []
+  sessions.value = []
+  messages.value = []
+  await loadKnowledgeBases()
+}
+
+async function selectKnowledgeBase(item: KnowledgeBase) {
+  knowledgeBase.value = item
+  knowledgeBaseId.value = String(item.id)
+  documents.value = []
+  searchResults.value = []
+  answer.value = null
+  await Promise.all([loadDocuments(), loadConversations()])
+}
+
+async function handleKnowledgeBaseChange() {
+  const selected = knowledgeBases.value.find((item) => item.id === Number(knowledgeBaseId.value))
+  if (selected) await selectKnowledgeBase(selected)
 }
 
 async function createWorkspace() {
@@ -99,6 +157,10 @@ async function createWorkspace() {
   try {
     const response = await createWorkspaceApi(Number(userId.value), workspaceName.value.trim())
     workspaceId.value = String(response.data.id)
+    workspaces.value = [...workspaces.value, response.data]
+    knowledgeBases.value = []
+    knowledgeBase.value = null
+    knowledgeBaseId.value = ''
     message.value = `工作空间已创建：${response.data.name}（ID ${response.data.id}）`
   } catch (error) { showError(error, '创建工作空间失败')
   } finally { loading.value = false }
@@ -109,7 +171,9 @@ async function create() {
   loading.value = true; message.value = ''
   try {
     const response = await createKnowledgeBase(Number(userId.value), Number(workspaceId.value), name.value, description.value)
-    knowledgeBase.value = response.data; documents.value = []; searchResults.value = []; answer.value = null
+    knowledgeBase.value = response.data; knowledgeBaseId.value = String(response.data.id)
+    knowledgeBases.value = [...knowledgeBases.value, response.data]
+    documents.value = []; searchResults.value = []; answer.value = null
     await loadConversations(); message.value = '知识库创建成功，现在可以上传文档。'
   } catch (error) { showError(error, '创建知识库失败')
   } finally { loading.value = false }
@@ -209,10 +273,10 @@ async function retry(documentId: number) {
     </section>
 
     <section v-else class="workspace-grid">
-      <aside class="setup-column"><section class="panel setup-panel"><div class="section-heading"><div><p class="eyebrow">01 · SETUP</p><h2>准备工作空间</h2></div><span class="step-number">01</span></div><p class="section-copy">先创建一个属于你的工作空间，再在里面建立知识库。</p><div class="inline-create"><label>工作空间名称<input v-model="workspaceName" maxlength="128" placeholder="例如：产品研发部" /></label><button class="secondary-button" :disabled="loading || !workspaceName.trim()" type="button" @click="createWorkspace">一键创建</button></div><div class="divider"><span>或使用已有空间</span></div><label>工作空间 ID<input v-model="workspaceId" type="number" min="1" required placeholder="输入数字 ID" /></label></section>
+      <aside class="setup-column"><section class="panel setup-panel"><div class="section-heading"><div><p class="eyebrow">01 · SETUP</p><h2>准备工作空间</h2></div><span class="step-number">01</span></div><p class="section-copy">选择已有空间，或创建一个新的工作空间。</p><label>当前工作空间<select v-model="workspaceId" :disabled="loading || !workspaces.length" @change="handleWorkspaceChange"><option value="" disabled>{{ workspaces.length ? '请选择工作空间' : '暂时没有工作空间' }}</option><option v-for="workspace in workspaces" :key="workspace.id" :value="String(workspace.id)">{{ workspace.name }} · #{{ workspace.id }}</option></select></label><div class="inline-create"><label>新空间名称<input v-model="workspaceName" maxlength="128" placeholder="例如：产品研发部" /></label><button class="secondary-button" :disabled="loading || !workspaceName.trim()" type="button" @click="createWorkspace">一键创建</button></div></section>
       <form class="panel setup-panel" @submit.prevent="create"><div class="section-heading"><div><p class="eyebrow">02 · CREATE</p><h2>创建知识库</h2></div><span class="step-number">02</span></div><p class="section-copy">为资料集合设置一个清晰的名字和描述。</p><label>知识库名称<input v-model="name" maxlength="128" required placeholder="例如：研发规范" /></label><label>描述<textarea v-model="description" maxlength="500" placeholder="可选：这套资料主要解决什么问题？" /></label><button class="primary-button wide-button" :disabled="loading || !workspaceId || !name.trim()" type="submit">{{ loading ? '处理中…' : '创建知识库' }}</button></form><p v-if="message" class="message side-message" :class="{ 'message-error': message.includes('失败') || message.includes('错误') }">{{ message }}</p></aside>
 
-      <section class="panel content-panel"><div class="section-heading content-heading"><div><p class="eyebrow">YOUR KNOWLEDGE</p><h2>{{ knowledgeBase ? knowledgeBase.name : '当前知识库' }}</h2></div><span v-if="knowledgeBase" class="status-pill active">{{ knowledgeBase.status }}</span></div>
+      <section class="panel content-panel"><div class="section-heading content-heading"><div><p class="eyebrow">YOUR KNOWLEDGE</p><h2>{{ knowledgeBase ? knowledgeBase.name : '当前知识库' }}</h2></div><div class="knowledge-selector"><select v-model="knowledgeBaseId" :disabled="loading || !knowledgeBases.length" @change="handleKnowledgeBaseChange"><option value="" disabled>{{ knowledgeBases.length ? '选择知识库' : '暂无知识库' }}</option><option v-for="item in knowledgeBases" :key="item.id" :value="String(item.id)">{{ item.name }}</option></select><span v-if="knowledgeBase" class="status-pill active">{{ knowledgeBase.status }}</span></div></div>
         <div v-if="knowledgeBase" class="knowledge-content"><div class="knowledge-meta"><span>知识库 #{{ knowledgeBase.id }}</span><span>工作空间 #{{ knowledgeBase.workspaceId }}</span></div><div class="upload-zone"><div class="upload-icon">↑</div><div><strong>{{ selectedFile ? selectedFile.name : '上传一份资料' }}</strong><span>{{ selectedFile ? '已选择，准备开始解析' : '支持 TXT、MD、CSV、PDF、DOCX' }}</span></div><label class="file-button">选择文件<input type="file" accept=".txt,.md,.csv,.pdf,.docx" @change="selectFile" /></label><button class="primary-button" :disabled="loading || !selectedFile" type="button" @click="upload">{{ loading ? '上传中…' : '上传并解析' }}</button></div>
           <div class="content-section"><div class="subsection-heading"><div><h3>文档资产</h3><span>{{ documents.length }} 个文件</span></div><button class="ghost-button" :disabled="loading" type="button" @click="loadDocuments">刷新列表</button></div><div v-if="documents.length" class="document-list"><article v-for="item in documents" :key="item.id" class="document-row"><div class="document-info"><span class="file-type">{{ item.contentType.split('/').pop()?.slice(0, 4).toUpperCase() }}</span><div><strong>{{ item.originalFilename }}</strong><span>{{ Math.ceil(item.fileSize / 1024) }} KB · 任务 {{ item.processingTaskId || '未提交' }}</span><small v-if="item.processingFailureReason" class="failure-reason">{{ item.processingFailureReason }}</small><small v-if="item.processingRetryCount">已重试 {{ item.processingRetryCount }} 次</small></div></div><div class="document-actions"><span class="status-pill" :class="`status-${item.status.toLowerCase()}`">{{ item.status }}</span><div><button class="text-button" :disabled="loading" type="button" @click="refreshStatus(item.id)">查询</button><button class="text-button" :disabled="loading" type="button" @click="reparse(item.id)">重新解析</button><button v-if="item.status === 'FAILED'" class="text-button danger" :disabled="loading" type="button" @click="retry(item.id)">重试</button></div></div></article></div><div v-else class="empty-state"><span class="empty-icon">◌</span><strong>还没有文档</strong><span>上传第一份资料，开始构建你的知识库。</span></div></div>
           <div class="content-section conversation-section"><div class="subsection-heading"><div><h3>AI 问答</h3><span>回答会自动保存到当前会话</span></div><button class="ghost-button" :disabled="loading" type="button" @click="newSession">新建会话</button></div><div v-if="sessions.length" class="session-list"><button v-for="session in sessions" :key="session.id" class="session-item" :class="{ active: currentSession?.id === session.id }" type="button" @click="selectSession(session)">{{ session.title }}</button></div><form class="ask-form" @submit.prevent="search"><input v-model="query" maxlength="1000" placeholder="输入问题或关键词，例如：研发流程有哪些阶段？" /><button class="secondary-button" :disabled="loading || !query.trim()" type="submit">检索</button><button class="primary-button" :disabled="loading || !query.trim() || !currentSession" type="button" @click="ask">生成回答</button></form><div v-if="messages.length" class="message-list"><article v-for="item in messages" :key="item.id" class="chat-message" :class="item.role.toLowerCase()"><small>{{ item.role === 'USER' ? '我' : 'AI 助手' }}</small><p>{{ item.content }}</p><small v-for="source in item.sources" :key="`${item.id}-${source.documentObjectKey}`" class="source-label">引用：{{ source.documentObjectKey }}</small></article></div><article v-if="answer" class="answer-card"><div class="answer-title"><span class="answer-icon">✦</span><h3>回答</h3></div><p>{{ answer.answer }}</p><small v-for="source in answer.sources" :key="source.documentObjectKey" class="source-label">来源：{{ source.documentObjectKey }}</small></article><div v-if="searchResults.length" class="search-results"><div class="result-label">检索结果 · {{ searchResults.length }}</div><article v-for="result in searchResults" :key="`${result.documentObjectKey}-${result.content}`" class="search-result"><small>{{ result.documentObjectKey }} · 相关度 {{ result.score.toFixed(2) }}</small><p>{{ result.content }}</p></article></div></div>

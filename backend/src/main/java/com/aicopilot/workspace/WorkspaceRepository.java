@@ -6,6 +6,8 @@ public interface WorkspaceRepository {
 
     Workspace save(Workspace workspace);
 
+    List<Workspace> findByUserId(Long userId);
+
     void addMember(WorkspaceMember member);
 
     List<WorkspaceMember> findMembers(Long workspaceId);

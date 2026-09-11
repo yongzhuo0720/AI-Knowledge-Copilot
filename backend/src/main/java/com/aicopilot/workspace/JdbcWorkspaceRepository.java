@@ -43,6 +43,21 @@ public class JdbcWorkspaceRepository implements WorkspaceRepository {
     }
 
     @Override
+    public List<Workspace> findByUserId(Long userId) {
+        return jdbcTemplate.query(
+                "SELECT w.id, w.name, w.owner_user_id FROM workspace w "
+                        + "INNER JOIN workspace_member m ON m.workspace_id = w.id "
+                        + "WHERE m.user_id = ? ORDER BY w.created_at, w.id",
+                (resultSet, rowNumber) -> new Workspace(
+                        resultSet.getLong("id"),
+                        resultSet.getString("name"),
+                        resultSet.getLong("owner_user_id")
+                ),
+                userId
+        );
+    }
+
+    @Override
     public void addMember(WorkspaceMember member) {
         jdbcTemplate.update(
                 "INSERT INTO workspace_member (workspace_id, user_id, role) VALUES (?, ?, ?)",

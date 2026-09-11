@@ -67,6 +67,22 @@ public class JdbcKnowledgeRepository implements KnowledgeRepository {
     }
 
     @Override
+    public List<KnowledgeBase> findKnowledgeBases(Long workspaceId) {
+        return jdbcTemplate.query(
+                "SELECT id, workspace_id, name, description, status FROM knowledge_base "
+                        + "WHERE workspace_id = ? ORDER BY created_at, id",
+                (resultSet, rowNumber) -> new KnowledgeBase(
+                        resultSet.getLong("id"),
+                        resultSet.getLong("workspace_id"),
+                        resultSet.getString("name"),
+                        resultSet.getString("description"),
+                        resultSet.getString("status")
+                ),
+                workspaceId
+        );
+    }
+
+    @Override
     public KnowledgeDocument saveDocument(KnowledgeDocument document) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {

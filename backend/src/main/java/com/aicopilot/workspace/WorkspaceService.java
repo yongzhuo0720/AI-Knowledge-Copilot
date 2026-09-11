@@ -39,6 +39,16 @@ public class WorkspaceService {
         return WorkspaceResponse.from(workspace);
     }
 
+    @Transactional(readOnly = true)
+    public List<WorkspaceResponse> findForUser(Long userId) {
+        if (userId == null) {
+            throw new AccessDeniedException("authentication is required");
+        }
+        return workspaceRepository.findByUserId(userId).stream()
+                .map(WorkspaceResponse::from)
+                .toList();
+    }
+
     @Transactional
     public WorkspaceMemberResponse addMember(Long workspaceId, AddWorkspaceMemberRequest request) {
         WorkspaceMember member = new WorkspaceMember(
