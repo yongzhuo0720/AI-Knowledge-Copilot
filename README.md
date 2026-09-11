@@ -6,6 +6,7 @@
 
 - 用户、工作空间与知识库基础管理。
 - 知识库接口按工作空间成员隔离，业务请求需携带 `X-User-Id` 请求头。
+- 会话历史按用户和知识库持久化，问答消息会保存回答引用并将历史上下文传给 AI Service。
 - 从前端选择真实文件并以 multipart 上传。
 - 后端将原文件保存至 MinIO 的 `ai-copilot` bucket，并将文档元数据保存至 MySQL。
 - 上传后自动创建 AI 解析任务；页面可查看文档列表、任务 ID 与最新解析状态。
@@ -71,6 +72,10 @@ X-User-Id: 16
 | `POST` | `/api/v1/knowledge-bases/{knowledgeBaseId}/documents/{documentId}/processing-retry` | 重试失败的解析任务 |
 | `POST` | `/api/v1/knowledge-bases/{knowledgeBaseId}/search` | 检索知识库片段 |
 | `POST` | `/api/v1/knowledge-bases/{knowledgeBaseId}/answer` | 根据检索片段生成回答与引用 |
+| `POST` | `/api/v1/knowledge-bases/{knowledgeBaseId}/conversations` | 创建会话 |
+| `GET` | `/api/v1/knowledge-bases/{knowledgeBaseId}/conversations` | 获取当前用户会话列表 |
+| `GET` | `/api/v1/knowledge-bases/{knowledgeBaseId}/conversations/{sessionId}/messages` | 获取会话消息与引用 |
+| `POST` | `/api/v1/knowledge-bases/{knowledgeBaseId}/conversations/{sessionId}/messages` | 在会话中提问并保存回答 |
 | `POST` | `/api/v1/document-processing/tasks` | AI Service：创建解析任务 |
 | `GET` | `/api/v1/document-processing/tasks/{taskId}` | AI Service：获取任务状态 |
 | `POST` | `/api/v1/document-processing/tasks/{taskId}/retry` | AI Service：重试失败任务 |

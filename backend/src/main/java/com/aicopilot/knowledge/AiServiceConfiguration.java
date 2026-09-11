@@ -2,6 +2,7 @@ package com.aicopilot.knowledge;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.aicopilot.conversation.ConversationMessage;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -90,7 +91,7 @@ public class AiServiceConfiguration {
     KnowledgeAnswerClient knowledgeAnswerClient(
             AiServiceProperties properties, ObjectMapper objectMapper
     ) {
-        return (knowledgeBaseId, question) -> {
+        return (knowledgeBaseId, question, history) -> {
             if (!properties.isEnabled()) return new KnowledgeAnswer("AI service is disabled", List.of());
             HttpURLConnection connection = null;
             try {
@@ -102,7 +103,13 @@ public class AiServiceConfiguration {
                 connection.setRequestMethod("POST");
                 connection.setDoOutput(true);
                 connection.setRequestProperty("Content-Type", MediaType.APPLICATION_JSON_VALUE);
-                byte[] payload = objectMapper.writeValueAsBytes(new AiServiceAnswerRequest(knowledgeBaseId, question));
+                byte[] payload = objectMapper.writeValueAsBytes(new AiServiceAnswerRequest(
+                        knowledgeBaseId,
+                        question,
+                        history.stream()
+                                .map(message -> new AiServiceHistoryMessage(message.role(), message.content()))
+                                .toList()
+                ));
                 connection.setFixedLengthStreamingMode(payload.length);
                 try (var outputStream = connection.getOutputStream()) {
                     outputStream.write(payload);
@@ -247,8 +254,12 @@ public class AiServiceConfiguration {
 
     private record AiServiceAnswerRequest(
             @com.fasterxml.jackson.annotation.JsonProperty("knowledge_base_id") Long knowledgeBaseId,
-            String question
+            String question,
+            List<AiServiceHistoryMessage> history
     ) {
+    }
+
+    private record AiServiceHistoryMessage(String role, String content) {
     }
 
     private record DocumentProcessingResponseEnvelope(

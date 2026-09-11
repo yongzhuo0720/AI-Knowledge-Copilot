@@ -37,6 +37,29 @@ export interface KnowledgeAnswer {
   sources: KnowledgeRetrievalChunk[]
 }
 
+export interface ConversationSession {
+  id: number
+  knowledgeBaseId: number
+  userId: number
+  title: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ConversationMessage {
+  id: number
+  sessionId: number
+  role: 'USER' | 'ASSISTANT'
+  content: string
+  createdAt: string
+  sources: KnowledgeRetrievalChunk[]
+}
+
+export interface ConversationReply {
+  userMessage: ConversationMessage
+  assistantMessage: ConversationMessage
+}
+
 function userHeaders(userId: number): HeadersInit {
   return { 'X-User-Id': String(userId) }
 }
@@ -159,4 +182,60 @@ export async function askKnowledge(userId: number, knowledgeBaseId: number, ques
   })
   if (!response.ok) throw new Error(`知识问答失败：${response.status}`)
   return response.json() as Promise<ApiResponse<KnowledgeAnswer>>
+}
+
+export async function createConversation(
+  userId: number,
+  knowledgeBaseId: number,
+  title?: string,
+): Promise<ApiResponse<ConversationSession>> {
+  const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/conversations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
+    body: JSON.stringify({ title }),
+  })
+  if (!response.ok) throw new Error(`创建会话失败：${response.status}`)
+  return response.json() as Promise<ApiResponse<ConversationSession>>
+}
+
+export async function listConversations(
+  userId: number,
+  knowledgeBaseId: number,
+): Promise<ApiResponse<ConversationSession[]>> {
+  const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/conversations`, {
+    headers: userHeaders(userId),
+  })
+  if (!response.ok) throw new Error(`获取会话列表失败：${response.status}`)
+  return response.json() as Promise<ApiResponse<ConversationSession[]>>
+}
+
+export async function listConversationMessages(
+  userId: number,
+  knowledgeBaseId: number,
+  sessionId: number,
+): Promise<ApiResponse<ConversationMessage[]>> {
+  const response = await fetch(
+    `/api/v1/knowledge-bases/${knowledgeBaseId}/conversations/${sessionId}/messages`,
+    { headers: userHeaders(userId) },
+  )
+  if (!response.ok) throw new Error(`获取会话消息失败：${response.status}`)
+  return response.json() as Promise<ApiResponse<ConversationMessage[]>>
+}
+
+export async function askConversation(
+  userId: number,
+  knowledgeBaseId: number,
+  sessionId: number,
+  question: string,
+): Promise<ApiResponse<ConversationReply>> {
+  const response = await fetch(
+    `/api/v1/knowledge-bases/${knowledgeBaseId}/conversations/${sessionId}/messages`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
+      body: JSON.stringify({ question }),
+    },
+  )
+  if (!response.ok) throw new Error(`会话问答失败：${response.status}`)
+  return response.json() as Promise<ApiResponse<ConversationReply>>
 }

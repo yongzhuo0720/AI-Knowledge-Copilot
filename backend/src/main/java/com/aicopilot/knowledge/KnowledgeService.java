@@ -3,6 +3,7 @@ package com.aicopilot.knowledge;
 import com.aicopilot.common.storage.ObjectStorageService;
 import com.aicopilot.common.exception.AccessDeniedException;
 import com.aicopilot.workspace.WorkspaceRepository;
+import com.aicopilot.conversation.ConversationMessage;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -245,6 +246,16 @@ public class KnowledgeService {
         KnowledgeBase knowledgeBase = knowledgeRepository.findKnowledgeBase(knowledgeBaseId)
                 .orElseThrow(() -> new AccessDeniedException("user cannot access this knowledge base"));
         authorizeWorkspace(knowledgeBase.workspaceId(), userId);
+    }
+
+    public void assertKnowledgeBaseAccess(Long knowledgeBaseId, Long userId) {
+        authorizeKnowledgeBase(knowledgeBaseId, userId);
+    }
+
+    public KnowledgeAnswer answerWithHistory(Long userId, Long knowledgeBaseId, String question,
+                                              List<ConversationMessage> history) {
+        authorizeKnowledgeBase(knowledgeBaseId, userId);
+        return knowledgeAnswerClient.answer(knowledgeBaseId, question.trim(), history);
     }
 
     private KnowledgeDocument withProcessingTask(KnowledgeDocument document, String taskId, String status) {

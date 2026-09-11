@@ -51,3 +51,9 @@ class RetrievalChunk(BaseModel):
 class AnswerRequest(BaseModel):
     knowledge_base_id: int = Field(gt=0, validation_alias=AliasChoices("knowledge_base_id", "knowledgeBaseId"))
     question: str = Field(min_length=1, max_length=1000)
+    history: list["ChatHistoryMessage"] = Field(default_factory=list, max_length=30)
+
+
+class ChatHistoryMessage(BaseModel):
+    role: str = Field(pattern="^(USER|ASSISTANT|user|assistant)$")
+    content: str = Field(min_length=1, max_length=10000)

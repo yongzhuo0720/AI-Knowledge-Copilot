@@ -3,8 +3,11 @@ import { ref } from 'vue'
 
 import {
   createKnowledgeBase,
-  askKnowledge,
+  askConversation,
+  createConversation,
   listDocuments,
+  listConversationMessages,
+  listConversations,
   reparseDocument,
   refreshDocumentProcessingStatus,
   retryDocumentProcessing,
@@ -14,6 +17,8 @@ import {
   type KnowledgeAnswer,
   type KnowledgeDocument,
   type KnowledgeRetrievalChunk,
+  type ConversationMessage,
+  type ConversationSession,
 } from '@/services/api'
 
 const workspaceId = ref('')
@@ -28,6 +33,9 @@ const selectedFile = ref<File | null>(null)
 const query = ref('')
 const searchResults = ref<KnowledgeRetrievalChunk[]>([])
 const answer = ref<KnowledgeAnswer | null>(null)
+const sessions = ref<ConversationSession[]>([])
+const currentSession = ref<ConversationSession | null>(null)
+const messages = ref<ConversationMessage[]>([])
 
 async function create() {
   message.value = ''
@@ -36,7 +44,8 @@ async function create() {
     const response = await createKnowledgeBase(Number(userId.value), Number(workspaceId.value), name.value, description.value)
     knowledgeBase.value = response.data
     documents.value = []
-    message.value = '知识库创建成功，可以登记文档元数据。'
+    await loadConversations()
+    message.value = '知识库创建成功，可以上传文档并开始会话。'
   } catch (error) {
     message.value = error instanceof Error ? error.message : '创建失败'
   } finally {
@@ -58,13 +67,52 @@ async function search() {
 }
 
 async function ask() {
-  if (!knowledgeBase.value || !query.value.trim()) return
+  if (!knowledgeBase.value || !currentSession.value || !query.value.trim()) return
   loading.value = true
   try {
-    const response = await askKnowledge(Number(userId.value), knowledgeBase.value.id, query.value.trim())
-    answer.value = response.data
+    const response = await askConversation(
+      Number(userId.value), knowledgeBase.value.id, currentSession.value.id, query.value.trim(),
+    )
+    messages.value = [...messages.value, response.data.userMessage, response.data.assistantMessage]
+    answer.value = { answer: response.data.assistantMessage.content, sources: response.data.assistantMessage.sources }
+    await loadConversations()
   } catch (error) {
     message.value = error instanceof Error ? error.message : '问答失败'
+  } finally {
+    loading.value = false
+  }
+}
+
+async function loadConversations() {
+  if (!knowledgeBase.value) return
+  const response = await listConversations(Number(userId.value), knowledgeBase.value.id)
+  sessions.value = response.data
+  if (!sessions.value.length) {
+    const created = await createConversation(Number(userId.value), knowledgeBase.value.id)
+    sessions.value = [created.data]
+    await selectSession(created.data)
+  } else if (!currentSession.value || !sessions.value.some((session) => session.id === currentSession.value?.id)) {
+    await selectSession(sessions.value[0])
+  }
+}
+
+async function selectSession(session: ConversationSession) {
+  if (!knowledgeBase.value) return
+  currentSession.value = session
+  const response = await listConversationMessages(Number(userId.value), knowledgeBase.value.id, session.id)
+  messages.value = response.data
+  answer.value = null
+}
+
+async function newSession() {
+  if (!knowledgeBase.value) return
+  loading.value = true
+  try {
+    const response = await createConversation(Number(userId.value), knowledgeBase.value.id)
+    sessions.value = [response.data, ...sessions.value]
+    await selectSession(response.data)
+  } catch (error) {
+    message.value = error instanceof Error ? error.message : '创建会话失败'
   } finally {
     loading.value = false
   }
@@ -169,6 +217,21 @@ async function retry(documentId: number) {
           <label class="file-picker">选择文档<input type="file" @change="selectFile" /></label>
           <button :disabled="loading || !selectedFile" type="button" @click="upload">{{ loading ? '上传中…' : '上传并解析' }}</button>
           <button :disabled="loading" class="secondary" type="button" @click="loadDocuments">刷新文档列表</button>
+          <div class="conversation-header">
+            <strong>会话历史</strong>
+            <button :disabled="loading" class="secondary" type="button" @click="newSession">新建会话</button>
+          </div>
+          <div v-if="sessions.length" class="session-list">
+            <button
+              v-for="session in sessions"
+              :key="session.id"
+              class="session-item"
+              :class="{ active: currentSession?.id === session.id }"
+              type="button"
+              @click="selectSession(session)"
+            >{{ session.title }}</button>
+          </div>
+          <p v-else class="empty">创建知识库后会自动建立第一个会话。</p>
         </div>
         <p v-else class="empty">创建后将在这里显示知识库信息。</p>
         <div v-if="documents.length" class="document-list">
@@ -191,8 +254,15 @@ async function retry(documentId: number) {
         <form v-if="knowledgeBase" class="search-form" @submit.prevent="search">
           <label>检索知识库<input v-model="query" maxlength="1000" placeholder="输入问题或关键词" /></label>
           <button :disabled="loading || !query.trim()" type="submit">检索</button>
-          <button :disabled="loading || !query.trim()" type="button" @click="ask">生成回答</button>
+          <button :disabled="loading || !query.trim() || !currentSession" type="button" @click="ask">生成回答</button>
         </form>
+        <div v-if="messages.length" class="message-list">
+          <article v-for="item in messages" :key="item.id" class="chat-message" :class="item.role.toLowerCase()">
+            <small>{{ item.role === 'USER' ? '我' : 'AI 助手' }}</small>
+            <p>{{ item.content }}</p>
+            <small v-for="source in item.sources" :key="`${item.id}-${source.documentObjectKey}`">引用：{{ source.documentObjectKey }}</small>
+          </article>
+        </div>
         <article v-if="answer" class="answer-card">
           <h3>回答</h3><p>{{ answer.answer }}</p>
           <small v-for="source in answer.sources" :key="source.documentObjectKey">来源：{{ source.documentObjectKey }}</small>

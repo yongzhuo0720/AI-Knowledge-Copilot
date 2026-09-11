@@ -86,7 +86,8 @@ def search_knowledge(request: RetrievalRequest) -> dict[str, object]:
 
 @app.post("/api/v1/answers", response_model=dict[str, object])
 def answer_knowledge_question(request: AnswerRequest) -> dict[str, object]:
-    return {"code": "0", "message": "success", "data": answer_question(request.knowledge_base_id, request.question)}
+    history = [message.model_dump() for message in request.history]
+    return {"code": "0", "message": "success", "data": answer_question(request.knowledge_base_id, request.question, history)}
 
 
 async def _recover_tasks_loop() -> None:

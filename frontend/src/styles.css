@@ -159,6 +159,15 @@ button:disabled { cursor: wait; opacity: 0.6; }
 .answer-card h3, .answer-card p { margin: 0 0 10px; }
 .answer-card p { line-height: 1.7; white-space: pre-wrap; }
 .answer-card small { display: block; color: #697386; overflow-wrap: anywhere; }
+.conversation-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; }
+.session-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.session-item { padding: 8px 12px; background: #f2f4fb; color: #4054b6; }
+.session-item.active { background: #5268d9; color: white; }
+.message-list { display: grid; gap: 10px; margin-top: 16px; }
+.chat-message { padding: 14px; border-radius: 12px; background: #f7f8fc; }
+.chat-message.user { background: #eef2ff; }
+.chat-message small { color: #697386; }
+.chat-message p { margin: 6px 0; line-height: 1.6; white-space: pre-wrap; }
 
 @media (max-width: 760px) {
   .workspace-grid { grid-template-columns: 1fr; }
