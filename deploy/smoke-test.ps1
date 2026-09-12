@@ -110,10 +110,10 @@ $email = "smoke-$suffix@example.com"
 $password = "Smoke-$suffix!Aa1"
 $username = "smoke-$suffix"
 
-Write-Host "1/7 检查 Backend 健康状态"
+Write-Host "1/9 检查 Backend 健康状态"
 Invoke-Api -Method GET -Path '/api/v1/health' | Out-Null
 
-Write-Host "2/7 注册并登录临时账号：$email"
+Write-Host "2/9 注册并登录临时账号：$email"
 Invoke-Api -Method POST -Path '/api/v1/users' -Body @{ username = $username; email = $email; password = $password } | Out-Null
 $login = Invoke-Api -Method POST -Path '/api/v1/users/login' -Body @{ email = $email; password = $password }
 $headers = @{ Authorization = "Bearer $($login.accessToken)" }
@@ -130,10 +130,10 @@ Wait-DocumentCompleted -KnowledgeBaseId $knowledgeBase.id -DocumentId $document.
 
 Write-Host '6/9 检索并生成回答'
 $search = Invoke-Api -Method POST -Path "/api/v1/knowledge-bases/$($knowledgeBase.id)/search" -Headers $headers -Body @{ query = '发布流程'; limit = 5 }
-if (-not $search -or $search.Count -lt 1) { throw '检索没有返回引用片段' }
+if ($null -eq $search -or @($search).Count -lt 1) { throw '检索没有返回引用片段' }
 $answer = Invoke-Api -Method POST -Path "/api/v1/knowledge-bases/$($knowledgeBase.id)/answer" -Headers $headers -Body @{ question = '发布流程是什么？' }
 if ([string]::IsNullOrWhiteSpace($answer.answer)) { throw '回答内容为空' }
-if (-not $answer.sources -or $answer.sources.Count -lt 1) { throw '回答没有返回引用来源' }
+if ($null -eq $answer.sources -or @($answer.sources).Count -lt 1) { throw '回答没有返回引用来源' }
 
 Write-Host '7/9 重新解析并确认向量可重建'
 Invoke-Api -Method POST -Path "/api/v1/knowledge-bases/$($knowledgeBase.id)/documents/$($document.id)/reparse" -Headers $headers | Out-Null
@@ -143,12 +143,12 @@ Write-Host '8/9 运行 Agent 会话并确认工具轨迹和引用'
 $session = Invoke-Api -Method POST -Path "/api/v1/knowledge-bases/$($knowledgeBase.id)/conversations" -Headers $headers -Body @{ title = 'Smoke Agent' }
 $agentReply = Invoke-Api -Method POST -Path "/api/v1/knowledge-bases/$($knowledgeBase.id)/conversations/$($session.id)/agent-messages" -Headers $headers -Body @{ question = '请根据文档说明发布流程' }
 if ([string]::IsNullOrWhiteSpace($agentReply.assistantMessage.content)) { throw 'Agent 回答内容为空' }
-if (-not $agentReply.assistantMessage.sources -or $agentReply.assistantMessage.sources.Count -lt 1) { throw 'Agent 回答没有返回引用来源' }
-if (-not $agentReply.assistantMessage.agentSteps -or $agentReply.assistantMessage.agentSteps.Count -lt 1) { throw 'Agent 没有返回工具调用轨迹' }
+if ($null -eq $agentReply.assistantMessage.sources -or @($agentReply.assistantMessage.sources).Count -lt 1) { throw 'Agent 回答没有返回引用来源' }
+if ($null -eq $agentReply.assistantMessage.agentSteps -or @($agentReply.assistantMessage.agentSteps).Count -lt 1) { throw 'Agent 没有返回工具调用轨迹' }
 
 Write-Host '9/9 端到端验证通过' -ForegroundColor Green
 Write-Host "知识库：$($knowledgeBase.name)（#$($knowledgeBase.id)）"
 Write-Host "文档：$($document.originalFilename)（#$($document.id)）"
-Write-Host "引用数：$($answer.sources.Count)"
-Write-Host "Agent 工具调用数：$($agentReply.assistantMessage.agentSteps.Count)"
+Write-Host "引用数：$(@($answer.sources).Count)"
+Write-Host "Agent 工具调用数：$(@($agentReply.assistantMessage.agentSteps).Count)"
 Write-Host "回答：$($answer.answer)"
