@@ -30,6 +30,11 @@ function Invoke-Api {
         $response = Invoke-RestMethod @request
     } catch {
         $detail = $_.ErrorDetails.Message
+        if ([string]::IsNullOrWhiteSpace($detail) -and $_.Exception.Response) {
+            $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+            try { $detail = $reader.ReadToEnd() } finally { $reader.Dispose() }
+        }
+        if ([string]::IsNullOrWhiteSpace($detail)) { $detail = $_.Exception.Message }
         throw "请求失败 $Method $Path：$detail"
     }
     if ($response.code -ne '0') {
@@ -118,11 +123,11 @@ Invoke-Api -Method POST -Path '/api/v1/users' -Body @{ username = $username; ema
 $login = Invoke-Api -Method POST -Path '/api/v1/users/login' -Body @{ email = $email; password = $password }
 $headers = @{ Authorization = "Bearer $($login.accessToken)" }
 
-Write-Host '3/7 创建工作空间和知识库'
+Write-Host '3/9 创建工作空间和知识库'
 $workspace = Invoke-Api -Method POST -Path '/api/v1/workspaces' -Headers $headers -Body @{ name = "Smoke $suffix"; ownerUserId = $login.user.id }
 $knowledgeBase = Invoke-Api -Method POST -Path '/api/v1/knowledge-bases' -Headers $headers -Body @{ workspaceId = $workspace.id; name = 'Smoke Knowledge Base'; description = 'Automated end-to-end verification' }
 
-Write-Host "4/7 上传文档：$FilePath"
+Write-Host "4/9 上传文档：$FilePath"
 $document = Invoke-MultipartApi -Path "/api/v1/knowledge-bases/$($knowledgeBase.id)/documents/upload" -Headers $headers -UploadPath $FilePath
 
 Write-Host '5/9 等待文档解析和向量索引'

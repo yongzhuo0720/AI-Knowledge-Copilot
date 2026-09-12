@@ -1,9 +1,12 @@
 import json
+import logging
 from urllib.request import Request, urlopen
 
 from app.answering import answer_question
 from app.indexing import retrieve_chunks
 from app.settings import settings
+
+logger = logging.getLogger(__name__)
 
 TOOLS = [{
     "type": "function",
@@ -45,35 +48,44 @@ def run_knowledge_agent(
     sources: list[dict[str, object]] = []
     steps: list[dict[str, object]] = []
 
-    for _ in range(3):
-        response = _chat_completion(messages, TOOLS)
-        assistant_message = response["choices"][0]["message"]
-        tool_calls = assistant_message.get("tool_calls") or []
-        if not tool_calls:
-            return {"answer": assistant_message.get("content") or "Agent 未生成回答。", "sources": sources, "steps": steps}
-        messages.append(assistant_message)
-        for tool_call in tool_calls:
-            function = tool_call.get("function", {})
-            if function.get("name") != "knowledge_search":
-                result: list[dict[str, object]] = []
-                query = question
-                limit = 5
-            else:
-                try:
-                    arguments = json.loads(function.get("arguments") or "{}")
-                except json.JSONDecodeError:
-                    arguments = {}
-                query = str(arguments.get("query") or question).strip()[:1000]
-                limit = _safe_limit(arguments.get("limit", 5))
-                result = retrieve_chunks(knowledge_base_id, query, limit)
-            sources.extend(item for item in result if item not in sources)
-            steps.append({"tool": function.get("name", "unknown"), "query": query, "result_count": len(result)})
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.get("id", "knowledge-search"),
-                "name": function.get("name", "knowledge_search"),
-                "content": json.dumps(result, ensure_ascii=False),
-            })
+    try:
+        for _ in range(3):
+            response = _chat_completion(messages, TOOLS)
+            assistant_message = response["choices"][0]["message"]
+            tool_calls = assistant_message.get("tool_calls") or []
+            if not tool_calls:
+                return {"answer": assistant_message.get("content") or "Agent 未生成回答。", "sources": sources, "steps": steps}
+            messages.append(assistant_message)
+            for tool_call in tool_calls:
+                function = tool_call.get("function", {})
+                if function.get("name") != "knowledge_search":
+                    result: list[dict[str, object]] = []
+                    query = question
+                    limit = 5
+                else:
+                    try:
+                        arguments = json.loads(function.get("arguments") or "{}")
+                    except json.JSONDecodeError:
+                        arguments = {}
+                    query = str(arguments.get("query") or question).strip()[:1000]
+                    limit = _safe_limit(arguments.get("limit", 5))
+                    result = retrieve_chunks(knowledge_base_id, query, limit)
+                sources.extend(item for item in result if item not in sources)
+                steps.append({"tool": function.get("name", "unknown"), "query": query, "result_count": len(result)})
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.get("id", "knowledge-search"),
+                    "name": function.get("name", "knowledge_search"),
+                    "content": json.dumps(result, ensure_ascii=False),
+                })
+    except Exception:
+        logger.exception("knowledge agent tool calling failed; falling back to retrieval answer")
+        fallback = answer_question(knowledge_base_id, question, history)
+        return {
+            "answer": fallback["answer"],
+            "sources": fallback["sources"],
+            "steps": [{"tool": "knowledge_search", "query": question, "result_count": len(fallback["sources"])}],
+        }
     return {"answer": "Agent 达到最大工具调用次数，请缩小问题范围后重试。", "sources": sources, "steps": steps}
 
 

@@ -47,3 +47,17 @@ def test_agent_executes_tool_call_and_returns_sources(monkeypatch) -> None:
     assert result["steps"] == [{"tool": "knowledge_search", "query": "发布流程", "result_count": 1}]
     assert result["sources"][0]["document_object_key"] == "kb/1/guide.md"
     assert requested_tools == [agent.TOOLS, agent.TOOLS]
+
+
+def test_agent_falls_back_when_tool_call_api_fails(monkeypatch) -> None:
+    monkeypatch.setattr(agent.settings, "chat_api_key", "test-key")
+    monkeypatch.setattr(agent, "_chat_completion", lambda messages, tools: (_ for _ in ()).throw(RuntimeError("temporary API failure")))
+    monkeypatch.setattr(agent, "answer_question", lambda knowledge_base_id, question, history: {
+        "answer": "普通回答已返回",
+        "sources": [{"document_object_key": "kb/1/guide.md", "content": "资料", "score": 0.9}],
+    })
+
+    result = agent.run_knowledge_agent(1, "如何发布？", [])
+
+    assert result["answer"] == "普通回答已返回"
+    assert result["steps"] == [{"tool": "knowledge_search", "query": "如何发布？", "result_count": 1}]
