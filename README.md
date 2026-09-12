@@ -98,7 +98,6 @@ DASHSCOPE_API_KEY=your-dashscope-key
 
 ```powershell
 cd D:\ai_project\AI_agent
-mvn -s C:\Users\24774\.m2\settings.xml -f backend\pom.xml package -DskipTests
 docker compose --env-file .\deploy\.env -f .\deploy\docker-compose.yml up --build -d
 ```
 

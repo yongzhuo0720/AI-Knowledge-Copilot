@@ -11,7 +11,6 @@ cd D:\ai_project\AI_agent
 Copy-Item deploy\.env.example deploy\.env
 # 编辑 deploy\.env，填写数据库、MinIO 和模型配置
 
-mvn -s C:\Users\24774\.m2\settings.xml -f backend\pom.xml package -DskipTests
 docker compose --env-file .\deploy\.env -f .\deploy\docker-compose.yml up --build -d
 ```
 
