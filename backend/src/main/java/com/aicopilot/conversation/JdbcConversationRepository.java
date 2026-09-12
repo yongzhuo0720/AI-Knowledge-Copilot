@@ -1,6 +1,7 @@
 package com.aicopilot.conversation;
 
 import com.aicopilot.knowledge.KnowledgeRetrievalChunk;
+import com.aicopilot.knowledge.KnowledgeAgentStep;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -84,6 +85,11 @@ public class JdbcConversationRepository implements ConversationRepository {
     @Override
     public void deleteSession(Long sessionId) {
         jdbcTemplate.update(
+                "DELETE FROM conversation_message_agent_step WHERE message_id IN "
+                        + "(SELECT id FROM conversation_message WHERE session_id = ?)",
+                sessionId
+        );
+        jdbcTemplate.update(
                 "DELETE FROM conversation_message_source WHERE message_id IN "
                         + "(SELECT id FROM conversation_message WHERE session_id = ?)",
                 sessionId
@@ -115,8 +121,17 @@ public class JdbcConversationRepository implements ConversationRepository {
                 );
             }
         }
+        if (message.agentSteps() != null) {
+            for (KnowledgeAgentStep step : message.agentSteps()) {
+                jdbcTemplate.update(
+                        "INSERT INTO conversation_message_agent_step (message_id, tool, query, result_count) VALUES (?, ?, ?, ?)",
+                        id.longValue(), step.tool(), step.query(), step.resultCount()
+                );
+            }
+        }
         return new ConversationMessage(id.longValue(), message.sessionId(), message.role(), message.content(), Instant.now(),
-                message.sources() == null ? List.of() : message.sources());
+                message.sources() == null ? List.of() : message.sources(),
+                message.agentSteps() == null ? List.of() : message.agentSteps());
     }
 
     @Override
@@ -140,8 +155,25 @@ public class JdbcConversationRepository implements ConversationRepository {
                 message.sources().add(new KnowledgeRetrievalChunk(row.documentObjectKey(), row.sourceContent(), row.score()));
             }
         }
+        Map<Long, List<KnowledgeAgentStep>> agentSteps = new LinkedHashMap<>();
+        jdbcTemplate.query(
+                "SELECT message_id, tool, query, result_count FROM conversation_message_agent_step "
+                        + "WHERE message_id IN (SELECT id FROM conversation_message WHERE session_id = ?) "
+                        + "ORDER BY message_id, id",
+                (resultSet, rowNumber) -> {
+                    agentSteps.computeIfAbsent(resultSet.getLong("message_id"), id -> new ArrayList<>())
+                            .add(new KnowledgeAgentStep(
+                                    resultSet.getString("tool"),
+                                    resultSet.getString("query"),
+                                    resultSet.getInt("result_count")
+                            ));
+                    return null;
+                }, sessionId
+        );
         return grouped.values().stream().map(message -> new ConversationMessage(
-                message.id(), message.sessionId(), message.role(), message.content(), message.createdAt(), List.copyOf(message.sources())
+                message.id(), message.sessionId(), message.role(), message.content(), message.createdAt(),
+                List.copyOf(message.sources()),
+                List.copyOf(agentSteps.getOrDefault(message.id(), List.of()))
         )).toList();
     }
 

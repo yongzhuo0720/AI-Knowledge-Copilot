@@ -91,6 +91,18 @@ public class ConversationController {
         return ApiResponse.success(conversationService.ask(authenticatedUserId(httpRequest), knowledgeBaseId, sessionId, request));
     }
 
+    @PostMapping("/{sessionId}/agent-messages")
+    public ApiResponse<ConversationReply> askAgent(
+            @PathVariable Long knowledgeBaseId,
+            @PathVariable Long sessionId,
+            HttpServletRequest httpRequest,
+            @Valid @RequestBody CreateMessageRequest request
+    ) {
+        return ApiResponse.success(conversationService.askAgent(
+                authenticatedUserId(httpRequest), knowledgeBaseId, sessionId, request
+        ));
+    }
+
     @PostMapping(value = "/{sessionId}/messages/stream", produces = "text/event-stream")
     public SseEmitter stream(
             @PathVariable Long knowledgeBaseId,

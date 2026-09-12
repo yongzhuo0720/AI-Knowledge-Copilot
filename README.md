@@ -210,6 +210,7 @@ Authorization: Bearer <access-token>
 | `POST` | `/api/v1/knowledge-bases/{id}/search` | 检索知识片段 |
 | `POST` | `/api/v1/knowledge-bases/{id}/answer` | 直接生成回答 |
 | `POST` | `/api/v1/knowledge-bases/{id}/agents/knowledge` | 运行知识库 Agent 和 Tool Calling |
+| `POST` | `/api/v1/knowledge-bases/{id}/conversations/{sessionId}/agent-messages` | 在持久化会话中运行 Agent |
 
 前端 `/retrieval` 页面会串联真实的检索和回答接口，用于观察一次 RAG 请求的输入、命中片段、上下文、Prompt 预览和回答引用。Embedding 卡片显示当前 `text-embedding-v4` 的 1024 维配置；原始向量不在浏览器展示。
 

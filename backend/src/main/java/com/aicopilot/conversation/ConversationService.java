@@ -3,6 +3,9 @@ package com.aicopilot.conversation;
 import com.aicopilot.common.exception.AccessDeniedException;
 import com.aicopilot.knowledge.KnowledgeAnswer;
 import com.aicopilot.knowledge.KnowledgeAnswerClient;
+import com.aicopilot.knowledge.KnowledgeAgentAnswer;
+import com.aicopilot.knowledge.KnowledgeAgentClient;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.aicopilot.knowledge.KnowledgeService;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
@@ -19,15 +22,27 @@ public class ConversationService {
     private final ConversationRepository conversationRepository;
     private final KnowledgeService knowledgeService;
     private final KnowledgeAnswerClient answerClient;
+    private final KnowledgeAgentClient agentClient;
 
     public ConversationService(
             ConversationRepository conversationRepository,
             KnowledgeService knowledgeService,
             KnowledgeAnswerClient answerClient
     ) {
+        this(conversationRepository, knowledgeService, answerClient, null);
+    }
+
+    @Autowired
+    public ConversationService(
+            ConversationRepository conversationRepository,
+            KnowledgeService knowledgeService,
+            KnowledgeAnswerClient answerClient,
+            KnowledgeAgentClient agentClient
+    ) {
         this.conversationRepository = conversationRepository;
         this.knowledgeService = knowledgeService;
         this.answerClient = answerClient;
+        this.agentClient = agentClient;
     }
 
     @Transactional
@@ -78,6 +93,25 @@ public class ConversationService {
         KnowledgeAnswer answer = answerClient.answer(knowledgeBaseId, request.question().trim(), history);
         ConversationMessage assistantMessage = conversationRepository.saveMessage(new ConversationMessage(
                 null, sessionId, "ASSISTANT", answer.answer(), Instant.now(), answer.sources()
+        ));
+        conversationRepository.touchSession(sessionId);
+        return new ConversationReply(userMessage, assistantMessage);
+    }
+
+    @Transactional
+    public ConversationReply askAgent(Long userId, Long knowledgeBaseId, Long sessionId, CreateMessageRequest request) {
+        findOwnedSession(userId, knowledgeBaseId, sessionId);
+        if (agentClient == null) {
+            throw new IllegalStateException("knowledge agent is not configured");
+        }
+        List<ConversationMessage> history = conversationRepository.findMessages(sessionId);
+        String question = request.question().trim();
+        ConversationMessage userMessage = conversationRepository.saveMessage(new ConversationMessage(
+                null, sessionId, "USER", question, Instant.now(), List.of()
+        ));
+        KnowledgeAgentAnswer answer = agentClient.run(knowledgeBaseId, question, history);
+        ConversationMessage assistantMessage = conversationRepository.saveMessage(new ConversationMessage(
+                null, sessionId, "ASSISTANT", answer.answer(), Instant.now(), answer.sources(), answer.steps()
         ));
         conversationRepository.touchSession(sessionId);
         return new ConversationReply(userMessage, assistantMessage);

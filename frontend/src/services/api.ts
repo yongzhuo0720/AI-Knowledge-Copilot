@@ -78,6 +78,7 @@ export interface ConversationMessage {
   content: string
   createdAt: string
   sources: KnowledgeRetrievalChunk[]
+  agentSteps?: KnowledgeAgentStep[]
 }
 
 export interface ConversationReply {
@@ -409,6 +410,23 @@ export async function askConversation(
     },
   )
   return parseResponse<ConversationReply>(response, '会话问答失败')
+}
+
+export async function askConversationAgent(
+  userId: number,
+  knowledgeBaseId: number,
+  sessionId: number,
+  question: string,
+): Promise<ApiResponse<ConversationReply>> {
+  const response = await fetch(
+    `/api/v1/knowledge-bases/${knowledgeBaseId}/conversations/${sessionId}/agent-messages`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
+      body: JSON.stringify({ question }),
+    },
+  )
+  return parseResponse<ConversationReply>(response, 'Agent 会话问答失败')
 }
 
 export type ConversationStreamEvent =

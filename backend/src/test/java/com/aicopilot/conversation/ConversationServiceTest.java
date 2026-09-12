@@ -2,6 +2,9 @@ package com.aicopilot.conversation;
 
 import com.aicopilot.knowledge.KnowledgeAnswer;
 import com.aicopilot.knowledge.KnowledgeAnswerClient;
+import com.aicopilot.knowledge.KnowledgeAgentAnswer;
+import com.aicopilot.knowledge.KnowledgeAgentClient;
+import com.aicopilot.knowledge.KnowledgeAgentStep;
 import com.aicopilot.knowledge.KnowledgeRetrievalChunk;
 import com.aicopilot.knowledge.KnowledgeService;
 import org.junit.jupiter.api.Test;
@@ -91,5 +94,32 @@ class ConversationServiceTest {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.deleteSession(99L, 20L, 8L))
                 .isInstanceOf(com.aicopilot.common.exception.AccessDeniedException.class);
         verify(repository, never()).deleteSession(8L);
+    }
+
+    @Test
+    void savesAgentAnswerSourcesAndExecutionSteps() {
+        ConversationRepository repository = mock(ConversationRepository.class);
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        KnowledgeAgentClient agentClient = mock(KnowledgeAgentClient.class);
+        ConversationSession session = new ConversationSession(7L, 20L, 3L, "Agent 会话", Instant.now(), Instant.now());
+        KnowledgeRetrievalChunk source = new KnowledgeRetrievalChunk("kb/20/guide.txt", "资料内容", 0.9);
+        KnowledgeAgentStep step = new KnowledgeAgentStep("knowledge_search", "发布流程", 1);
+        when(repository.findSession(7L, 20L, 3L)).thenReturn(java.util.Optional.of(session));
+        when(repository.findMessages(7L)).thenReturn(List.of());
+        when(repository.saveMessage(any(ConversationMessage.class))).thenAnswer(invocation -> {
+            ConversationMessage message = invocation.getArgument(0);
+            return new ConversationMessage(message.role().equals("USER") ? 2L : 3L, message.sessionId(),
+                    message.role(), message.content(), Instant.now(), message.sources(), message.agentSteps());
+        });
+        when(agentClient.run(20L, "当前问题", List.of()))
+                .thenReturn(new KnowledgeAgentAnswer("Agent 回答", List.of(source), List.of(step)));
+
+        ConversationReply reply = new ConversationService(repository, knowledgeService, mock(KnowledgeAnswerClient.class), agentClient)
+                .askAgent(3L, 20L, 7L, new CreateMessageRequest("当前问题"));
+
+        assertThat(reply.assistantMessage().content()).isEqualTo("Agent 回答");
+        assertThat(reply.assistantMessage().sources()).containsExactly(source);
+        assertThat(reply.assistantMessage().agentSteps()).containsExactly(step);
+        verify(repository).touchSession(7L);
     }
 }
