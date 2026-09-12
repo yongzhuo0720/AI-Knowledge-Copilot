@@ -66,6 +66,18 @@ class WorkspaceServiceTest {
     }
 
     @Test
+    void allowsAdminToUpdateExistingMemberRole() {
+        WorkspaceRepository repository = mock(WorkspaceRepository.class);
+        when(repository.isOwnerOrAdmin(10L, 2L)).thenReturn(true);
+
+        WorkspaceMemberResponse response = new WorkspaceService(repository)
+                .addMember(2L, 10L, new AddWorkspaceMemberRequest(3L, "ADMIN"));
+
+        assertThat(response.role()).isEqualTo("ADMIN");
+        verify(repository).addMember(new WorkspaceMember(10L, 3L, "ADMIN", null));
+    }
+
+    @Test
     void rejectsMemberListForNonMember() {
         WorkspaceRepository repository = mock(WorkspaceRepository.class);
         when(repository.isMember(10L, 99L)).thenReturn(false);

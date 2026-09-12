@@ -369,6 +369,7 @@ docker compose --env-file .\deploy\.env -f .\deploy\docker-compose.yml up --buil
 - `deploy/.env`、`.env`、模型密钥和本地数据不提交 Git。
 - 生产环境必须替换示例数据库和 MinIO 密码，并限制管理端口暴露范围。
 - 当前 Token 存储在 Redis，默认有效期为 8 小时。
+- Settings 页面可查看当前空间成员；OWNER/ADMIN 输入用户 ID 即可添加成员或更新其角色。
 - 生产环境建议接入 HTTPS、密钥管理服务、审计日志、限流和 Token 撤销机制。
 - MinIO、Milvus、MySQL、Redis 管理端口不应直接暴露到公网。
 

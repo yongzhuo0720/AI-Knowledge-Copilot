@@ -60,7 +60,8 @@ public class JdbcWorkspaceRepository implements WorkspaceRepository {
     @Override
     public void addMember(WorkspaceMember member) {
         jdbcTemplate.update(
-                "INSERT INTO workspace_member (workspace_id, user_id, role) VALUES (?, ?, ?)",
+                "INSERT INTO workspace_member (workspace_id, user_id, role) VALUES (?, ?, ?) "
+                        + "ON DUPLICATE KEY UPDATE role = VALUES(role)",
                 member.workspaceId(),
                 member.userId(),
                 member.role()

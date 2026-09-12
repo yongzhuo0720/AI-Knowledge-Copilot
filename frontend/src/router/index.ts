@@ -33,11 +33,16 @@ const router = createRouter({
       name: 'agents',
       component: () => import('@/views/AgentView.vue'),
     },
+    {
+      path: '/settings',
+      name: 'settings',
+      component: () => import('@/views/SettingsView.vue'),
+    },
   ],
 })
 
 router.beforeEach((to) => {
-  if ((to.path === '/documents' || to.path === '/chat' || to.path === '/retrieval' || to.path === '/agents') && !localStorage.getItem('accessToken')) {
+  if ((to.path === '/documents' || to.path === '/chat' || to.path === '/retrieval' || to.path === '/agents' || to.path === '/settings') && !localStorage.getItem('accessToken')) {
     return { path: '/knowledge' }
   }
   return true

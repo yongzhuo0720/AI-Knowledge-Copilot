@@ -97,6 +97,13 @@ export interface Workspace {
   ownerUserId: number
 }
 
+export interface WorkspaceMember {
+  workspaceId: number
+  userId: number
+  role: 'OWNER' | 'ADMIN' | 'MEMBER'
+  joinedAt: string | null
+}
+
 export interface WorkspaceOverview {
   workspaceId: number
   knowledgeBaseCount: number
@@ -188,6 +195,25 @@ export async function createWorkspace(userId: number, name: string): Promise<Api
 export async function listWorkspaces(userId: number): Promise<ApiResponse<Workspace[]>> {
   const response = await fetch('/api/v1/workspaces', { headers: userHeaders(userId) })
   return parseResponse<Workspace[]>(response, '获取工作空间失败')
+}
+
+export async function listWorkspaceMembers(userId: number, workspaceId: number): Promise<ApiResponse<WorkspaceMember[]>> {
+  const response = await fetch(`/api/v1/workspaces/${workspaceId}/members`, { headers: userHeaders(userId) })
+  return parseResponse<WorkspaceMember[]>(response, '获取工作空间成员失败')
+}
+
+export async function addWorkspaceMember(
+  userId: number,
+  workspaceId: number,
+  memberUserId: number,
+  role: WorkspaceMember['role'],
+): Promise<ApiResponse<WorkspaceMember>> {
+  const response = await fetch(`/api/v1/workspaces/${workspaceId}/members`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
+    body: JSON.stringify({ userId: memberUserId, role }),
+  })
+  return parseResponse<WorkspaceMember>(response, '添加工作空间成员失败')
 }
 
 export async function getWorkspaceOverview(userId: number, workspaceId: number): Promise<ApiResponse<WorkspaceOverview>> {

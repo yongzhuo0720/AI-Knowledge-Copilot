@@ -24,7 +24,7 @@ const workspaceError = ref('')
 const isAuthenticated = computed(() => Boolean(accessToken.value && currentUser.value))
 const showShell = computed(() => isAuthenticated.value)
 const activeWorkspace = computed(() => workspaces.value.find((workspace) => String(workspace.id) === activeWorkspaceId.value))
-const routeTitle = computed(() => route.path === '/knowledge' ? 'Knowledge workspace' : route.path === '/documents' ? 'Document library' : route.path === '/chat' ? 'AI Chat' : route.path === '/retrieval' ? 'Retrieval debug' : route.path === '/agents' ? 'Knowledge Agent' : 'Workspace overview')
+const routeTitle = computed(() => route.path === '/knowledge' ? 'Knowledge workspace' : route.path === '/documents' ? 'Document library' : route.path === '/chat' ? 'AI Chat' : route.path === '/retrieval' ? 'Retrieval debug' : route.path === '/agents' ? 'Knowledge Agent' : route.path === '/settings' ? 'Workspace settings' : 'Workspace overview')
 
 const primaryNavigation = [
   { label: 'Overview', caption: '工作空间总览', to: '/' },
@@ -33,10 +33,6 @@ const primaryNavigation = [
   { label: 'AI Chat', caption: '会话与来源', to: '/chat' },
   { label: 'Retrieval', caption: '检索链路调试', to: '/retrieval' },
   { label: 'Agents', caption: 'Agent 与工具调用', to: '/agents' },
-]
-
-const plannedNavigation = [
-  { label: 'Settings', caption: 'Workspace 设置' },
 ]
 
 async function loadWorkspaces() {
@@ -118,12 +114,8 @@ onBeforeUnmount(() => {
           <span>{{ item.label }}</span>
         </RouterLink>
 
-        <span class="sidebar-label nav-group-label">BUILD NEXT</span>
-        <span v-for="item in plannedNavigation" :key="item.label" class="nav-item nav-item-disabled" :title="`${item.caption} · 即将开放`">
-          <span class="nav-icon">{{ item.label === 'Documents' ? '◫' : item.label === 'AI Chat' ? '◌' : item.label === 'Retrieval' ? '⌕' : item.label === 'Agents' ? '✧' : '⚙' }}</span>
-          <span>{{ item.label }}</span>
-          <small>规划中</small>
-        </span>
+        <RouterLink class="nav-item" to="/settings" title="Workspace 设置"><span class="nav-icon">⚙</span><span>Settings</span></RouterLink>
+
       </nav>
 
       <div class="sidebar-footer">
