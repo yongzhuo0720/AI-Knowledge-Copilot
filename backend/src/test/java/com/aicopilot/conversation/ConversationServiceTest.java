@@ -122,4 +122,20 @@ class ConversationServiceTest {
         assertThat(reply.assistantMessage().agentSteps()).containsExactly(step);
         verify(repository).touchSession(7L);
     }
+
+    @Test
+    void forwardsConversationSearchAfterCheckingAccess() {
+        ConversationRepository repository = mock(ConversationRepository.class);
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        ConversationSession session = new ConversationSession(7L, 20L, 3L, "发布流程", Instant.now(), Instant.now());
+        when(repository.findSessions(20L, 3L, "发布")).thenReturn(List.of(session));
+
+        List<ConversationSession> result = new ConversationService(
+                repository, knowledgeService, mock(KnowledgeAnswerClient.class)
+        ).findSessions(3L, 20L, "发布");
+
+        assertThat(result).containsExactly(session);
+        verify(knowledgeService).assertKnowledgeBaseAccess(20L, 3L);
+        verify(repository).findSessions(20L, 3L, "发布");
+    }
 }

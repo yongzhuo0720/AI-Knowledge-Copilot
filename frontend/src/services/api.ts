@@ -372,8 +372,10 @@ export async function createConversation(
 export async function listConversations(
   userId: number,
   knowledgeBaseId: number,
+  query = '',
 ): Promise<ApiResponse<ConversationSession[]>> {
-  const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/conversations`, {
+  const queryString = query.trim() ? `?query=${encodeURIComponent(query.trim())}` : ''
+  const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/conversations${queryString}`, {
     headers: userHeaders(userId),
   })
   return parseResponse<ConversationSession[]>(response, '获取会话列表失败')

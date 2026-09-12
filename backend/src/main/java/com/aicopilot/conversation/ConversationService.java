@@ -58,8 +58,13 @@ public class ConversationService {
 
     @Transactional(readOnly = true)
     public List<ConversationSession> findSessions(Long userId, Long knowledgeBaseId) {
+        return findSessions(userId, knowledgeBaseId, "");
+    }
+
+    @Transactional(readOnly = true)
+    public List<ConversationSession> findSessions(Long userId, Long knowledgeBaseId, String query) {
         knowledgeService.assertKnowledgeBaseAccess(knowledgeBaseId, userId);
-        return conversationRepository.findSessions(knowledgeBaseId, userId);
+        return conversationRepository.findSessions(knowledgeBaseId, userId, query);
     }
 
     @Transactional(readOnly = true)

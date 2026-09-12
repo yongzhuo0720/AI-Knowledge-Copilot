@@ -48,16 +48,19 @@ public class JdbcConversationRepository implements ConversationRepository {
     }
 
     @Override
-    public List<ConversationSession> findSessions(Long knowledgeBaseId, Long userId) {
+    public List<ConversationSession> findSessions(Long knowledgeBaseId, Long userId, String query) {
+        String normalizedQuery = query == null ? "" : query.trim();
         return jdbcTemplate.query(
                 "SELECT id, knowledge_base_id, user_id, title, created_at, updated_at "
                         + "FROM conversation_session WHERE knowledge_base_id = ? AND user_id = ? "
+                        + "AND (? = '' OR title LIKE ? OR EXISTS (SELECT 1 FROM conversation_message m "
+                        + "WHERE m.session_id = conversation_session.id AND m.content LIKE ?)) "
                         + "ORDER BY updated_at DESC, id DESC",
                 (resultSet, rowNumber) -> new ConversationSession(
                         resultSet.getLong("id"), resultSet.getLong("knowledge_base_id"),
                         resultSet.getLong("user_id"), resultSet.getString("title"),
                         toInstant(resultSet.getTimestamp("created_at")), toInstant(resultSet.getTimestamp("updated_at"))
-                ), knowledgeBaseId, userId
+                ), knowledgeBaseId, userId, normalizedQuery, "%" + normalizedQuery + "%", "%" + normalizedQuery + "%"
         );
     }
 
