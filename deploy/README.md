@@ -28,6 +28,8 @@ $dockerExe = "C:\Users\24774\AppData\Local\Programs\DockerDesktop\resources\bin\
 docker compose --env-file .\deploy\.env -f .\deploy\docker-compose.yml ps
 ```
 
+Compose 会等待 MySQL、Redis、MinIO、etcd、Milvus、AI Service 和 Backend 健康后再启动依赖服务；首次启动 Milvus 可能需要几十秒，看到状态为 `healthy` 后再打开前端。
+
 ## 服务入口
 
 - Frontend：<http://localhost>

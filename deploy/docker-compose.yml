@@ -17,15 +17,20 @@ services:
       AI_SERVICE_BASE_URL: http://ai-service:8000
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     depends_on:
       mysql:
         condition: service_healthy
       redis:
         condition: service_healthy
       minio:
-        condition: service_started
+        condition: service_healthy
       ai-service:
-        condition: service_started
+        condition: service_healthy
 
   ai-service:
     build:
@@ -34,6 +39,11 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     environment:
       AI_SERVICE_MINIO_ENDPOINT: minio:9000
       AI_SERVICE_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
@@ -57,9 +67,9 @@ services:
       mysql:
         condition: service_healthy
       minio:
-        condition: service_started
+        condition: service_healthy
       milvus:
-        condition: service_started
+        condition: service_healthy
 
   frontend:
     build:
@@ -69,8 +79,14 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
   mysql:
     image: mysql:8.4
@@ -117,6 +133,11 @@ services:
     ports:
       - "9000:9000"
       - "9001:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     volumes:
       - minio-data:/data
 
@@ -135,6 +156,11 @@ services:
       --data-dir=/etcd
     volumes:
       - etcd-data:/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   milvus:
     image: milvusdb/milvus:v2.5.15
@@ -150,8 +176,15 @@ services:
     volumes:
       - milvus-data:/var/lib/milvus
     depends_on:
-      - etcd
-      - milvus-minio
+      etcd:
+        condition: service_healthy
+      milvus-minio:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9091/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
 
   milvus-minio:
     image: minio/minio:latest
