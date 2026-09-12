@@ -24,6 +24,7 @@ public class KnowledgeService {
     private final ObjectStorageService objectStorageService;
     private final KnowledgeRetrievalClient knowledgeRetrievalClient;
     private final KnowledgeAnswerClient knowledgeAnswerClient;
+    private final KnowledgeAgentClient knowledgeAgentClient;
     private final WorkspaceRepository workspaceRepository;
 
     public KnowledgeService(
@@ -34,7 +35,19 @@ public class KnowledgeService {
             KnowledgeAnswerClient knowledgeAnswerClient
     ) {
         this(knowledgeRepository, documentProcessingClient, objectStorageService, knowledgeRetrievalClient,
-                knowledgeAnswerClient, null);
+                knowledgeAnswerClient, null, null);
+    }
+
+    public KnowledgeService(
+            KnowledgeRepository knowledgeRepository,
+            DocumentProcessingClient documentProcessingClient,
+            ObjectStorageService objectStorageService,
+            KnowledgeRetrievalClient knowledgeRetrievalClient,
+            KnowledgeAnswerClient knowledgeAnswerClient,
+            WorkspaceRepository workspaceRepository
+    ) {
+        this(knowledgeRepository, documentProcessingClient, objectStorageService, knowledgeRetrievalClient,
+                knowledgeAnswerClient, workspaceRepository, null);
     }
 
     @Autowired
@@ -44,7 +57,8 @@ public class KnowledgeService {
             ObjectStorageService objectStorageService,
             KnowledgeRetrievalClient knowledgeRetrievalClient,
             KnowledgeAnswerClient knowledgeAnswerClient,
-            WorkspaceRepository workspaceRepository
+            WorkspaceRepository workspaceRepository,
+            KnowledgeAgentClient knowledgeAgentClient
     ) {
         this.knowledgeRepository = knowledgeRepository;
         this.documentProcessingClient = documentProcessingClient;
@@ -52,6 +66,7 @@ public class KnowledgeService {
         this.knowledgeRetrievalClient = knowledgeRetrievalClient;
         this.knowledgeAnswerClient = knowledgeAnswerClient;
         this.workspaceRepository = workspaceRepository;
+        this.knowledgeAgentClient = knowledgeAgentClient;
     }
 
     @Transactional
@@ -186,6 +201,16 @@ public class KnowledgeService {
     public KnowledgeAnswer answer(Long userId, Long knowledgeBaseId, KnowledgeQuestionRequest request) {
         authorizeKnowledgeBase(knowledgeBaseId, userId);
         return knowledgeAnswerClient.answer(knowledgeBaseId, request.question().trim());
+    }
+
+    @Transactional(readOnly = true)
+    public KnowledgeAgentAnswer runAgent(Long userId, Long knowledgeBaseId, KnowledgeQuestionRequest request,
+                                         List<ConversationMessage> history) {
+        authorizeKnowledgeBase(knowledgeBaseId, userId);
+        if (knowledgeAgentClient == null) {
+            return new KnowledgeAgentAnswer("Agent is not configured", List.of(), List.of());
+        }
+        return knowledgeAgentClient.run(knowledgeBaseId, request.question().trim(), history);
     }
 
     @Transactional

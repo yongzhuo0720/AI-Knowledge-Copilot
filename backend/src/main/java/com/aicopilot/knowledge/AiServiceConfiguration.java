@@ -212,6 +212,62 @@ public class AiServiceConfiguration {
     }
 
     @Bean
+    KnowledgeAgentClient knowledgeAgentClient(AiServiceProperties properties, ObjectMapper objectMapper) {
+        return (knowledgeBaseId, question, history) -> {
+            if (!properties.isEnabled()) {
+                return new KnowledgeAgentAnswer("AI service is disabled", List.of(), List.of());
+            }
+            try {
+                HttpURLConnection connection = (HttpURLConnection) new URL(
+                        properties.getBaseUrl() + "/api/v1/agents/knowledge"
+                ).openConnection();
+                connection.setConnectTimeout(10_000);
+                connection.setReadTimeout(90_000);
+                connection.setRequestMethod("POST");
+                connection.setDoOutput(true);
+                connection.setRequestProperty("Content-Type", MediaType.APPLICATION_JSON_VALUE);
+                byte[] payload = objectMapper.writeValueAsBytes(new AiServiceAnswerRequest(
+                        knowledgeBaseId,
+                        question,
+                        history.stream()
+                                .map(message -> new AiServiceHistoryMessage(message.role(), message.content()))
+                                .toList()
+                ));
+                connection.setFixedLengthStreamingMode(payload.length);
+                try (var outputStream = connection.getOutputStream()) {
+                    outputStream.write(payload);
+                }
+                if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
+                    throw new IllegalStateException("AI service rejected agent request");
+                }
+                try (InputStream inputStream = connection.getInputStream()) {
+                    JsonNode response = objectMapper.readTree(inputStream);
+                    JsonNode data = response.path("data");
+                    if (!"0".equals(response.path("code").asText()) || !data.isObject()) {
+                        throw new IllegalStateException("AI service rejected agent request");
+                    }
+                    List<KnowledgeAgentStep> steps = java.util.stream.StreamSupport.stream(
+                            data.path("steps").spliterator(), false
+                    ).map(step -> new KnowledgeAgentStep(
+                            step.path("tool").asText(),
+                            step.path("query").asText(),
+                            step.path("result_count").asInt()
+                    )).toList();
+                    return new KnowledgeAgentAnswer(
+                            data.path("answer").asText(),
+                            toRetrievalChunks(data.path("sources")),
+                            steps
+                    );
+                } finally {
+                    connection.disconnect();
+                }
+            } catch (IOException exception) {
+                throw new IllegalStateException("failed to run knowledge agent", exception);
+            }
+        };
+    }
+
+    @Bean
     IndexedChunkClient indexedChunkClient(AiServiceProperties properties, ObjectMapper objectMapper) {
         return knowledgeBaseIds -> {
             if (!properties.isEnabled() || knowledgeBaseIds.isEmpty()) return 0L;

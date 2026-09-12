@@ -52,6 +52,16 @@ export interface KnowledgeAnswer {
   sources: KnowledgeRetrievalChunk[]
 }
 
+export interface KnowledgeAgentStep {
+  tool: string
+  query: string
+  resultCount: number
+}
+
+export interface KnowledgeAgentAnswer extends KnowledgeAnswer {
+  steps: KnowledgeAgentStep[]
+}
+
 export interface ConversationSession {
   id: number
   knowledgeBaseId: number
@@ -304,6 +314,19 @@ export async function askKnowledge(userId: number, knowledgeBaseId: number, ques
     method: 'POST', headers: { 'Content-Type': 'application/json', ...userHeaders(userId) }, body: JSON.stringify({ question }),
   })
   return parseResponse<KnowledgeAnswer>(response, '知识问答失败')
+}
+
+export async function runKnowledgeAgent(
+  userId: number,
+  knowledgeBaseId: number,
+  question: string,
+): Promise<ApiResponse<KnowledgeAgentAnswer>> {
+  const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/agents/knowledge`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
+    body: JSON.stringify({ question }),
+  })
+  return parseResponse<KnowledgeAgentAnswer>(response, 'Agent 执行失败')
 }
 
 export async function createConversation(

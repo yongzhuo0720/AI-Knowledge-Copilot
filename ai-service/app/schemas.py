@@ -54,6 +54,10 @@ class AnswerRequest(BaseModel):
     history: list["ChatHistoryMessage"] = Field(default_factory=list, max_length=30)
 
 
+class AgentRequest(AnswerRequest):
+    pass
+
+
 class ChatHistoryMessage(BaseModel):
     role: str = Field(pattern="^(USER|ASSISTANT|user|assistant)$")
     content: str = Field(min_length=1, max_length=10000)

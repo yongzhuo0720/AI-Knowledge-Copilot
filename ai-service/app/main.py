@@ -9,8 +9,9 @@ import json
 
 from app.indexing import count_chunks, retrieve_chunks
 from app.answering import answer_question, stream_answer_question
+from app.agent import run_knowledge_agent
 from app.processing import get_parse_task, process_parse_task, recover_parse_tasks, retry_parse_task, submit_parse_task
-from app.schemas import AnswerRequest, ParseDocumentRequest, RetrievalRequest
+from app.schemas import AgentRequest, AnswerRequest, ParseDocumentRequest, RetrievalRequest
 from app.settings import settings
 
 @asynccontextmanager
@@ -102,6 +103,12 @@ def retrieval_stats(knowledge_base_ids: str = Query(default="")) -> dict[str, ob
 def answer_knowledge_question(request: AnswerRequest) -> dict[str, object]:
     history = [message.model_dump() for message in request.history]
     return {"code": "0", "message": "success", "data": answer_question(request.knowledge_base_id, request.question, history)}
+
+
+@app.post("/api/v1/agents/knowledge", response_model=dict[str, object])
+def run_knowledge_agent_endpoint(request: AgentRequest) -> dict[str, object]:
+    history = [message.model_dump() for message in request.history]
+    return {"code": "0", "message": "success", "data": run_knowledge_agent(request.knowledge_base_id, request.question, history)}
 
 
 @app.post("/api/v1/answers/stream")

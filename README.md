@@ -17,6 +17,7 @@
 - 基于 DeepSeek `deepseek-chat` 的回答生成。
 - 会话历史持久化，回答保存检索来源和引用对象。
 - Retrieval 调试工作台展示真实检索 Chunk、Score、Context、Prompt 和最终回答。
+- Knowledge Agent 通过真实 `knowledge_search` Tool Calling 检索当前知识库，再生成带引用回答和执行轨迹。
 - Vue 3 工作台：登录、注册、工作空间创建、上传、解析状态、检索和问答。
 
 ## 系统架构
@@ -208,6 +209,7 @@ Authorization: Bearer <access-token>
 | `POST` | `/api/v1/knowledge-bases/{id}/documents/{documentId}/processing-retry` | 重试失败任务 |
 | `POST` | `/api/v1/knowledge-bases/{id}/search` | 检索知识片段 |
 | `POST` | `/api/v1/knowledge-bases/{id}/answer` | 直接生成回答 |
+| `POST` | `/api/v1/knowledge-bases/{id}/agents/knowledge` | 运行知识库 Agent 和 Tool Calling |
 
 前端 `/retrieval` 页面会串联真实的检索和回答接口，用于观察一次 RAG 请求的输入、命中片段、上下文、Prompt 预览和回答引用。Embedding 卡片显示当前 `text-embedding-v4` 的 1024 维配置；原始向量不在浏览器展示。
 
@@ -237,8 +239,9 @@ Authorization: Bearer <access-token>
 | `GET` | `/api/v1/retrieval/stats?knowledge_base_ids={ids}` | 查询 Milvus 已索引 Chunk 数 |
 | `POST` | `/api/v1/answers` | 模型回答 |
 | `POST` | `/api/v1/answers/stream` | SSE 流式模型回答 |
+| `POST` | `/api/v1/agents/knowledge` | Tool Calling 知识库 Agent |
 
-AI Service 流式回答同样返回 `text/event-stream`，事件包括 `sources`、多个 `delta` 和 `complete`；异常由 Backend 统一转发为 `error` 事件。
+AI Service 流式回答同样返回 `text/event-stream`，事件包括 `sources`、多个 `delta` 和 `complete`；异常由 Backend 统一转发为 `error` 事件。知识库 Agent 会调用 `knowledge_search` 工具，并返回 `steps` 执行轨迹、`sources` 引用来源和最终 `answer`。
 
 ## 配置说明
 
@@ -378,4 +381,5 @@ docker compose --env-file .\deploy\.env -f .\deploy\docker-compose.yml up --buil
 - 增加 API 集成测试和 Docker Compose 烟囱测试。
 - 增加文档预览、批量上传、解析进度和失败任务监控。
 - 增加会话搜索能力。
+- 增加更多受权限保护的 Agent 工具和执行历史。
 - 增加生产环境部署、HTTPS、审计和细粒度 RBAC。

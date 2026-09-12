@@ -134,6 +134,17 @@ public class KnowledgeController {
         return ApiResponse.success(knowledgeService.answer(authenticatedUserId(httpRequest), knowledgeBaseId, request));
     }
 
+    @PostMapping("/{knowledgeBaseId}/agents/knowledge")
+    public ApiResponse<KnowledgeAgentAnswer> runKnowledgeAgent(
+            @PathVariable Long knowledgeBaseId,
+            HttpServletRequest httpRequest,
+            @Valid @RequestBody KnowledgeQuestionRequest request
+    ) {
+        return ApiResponse.success(knowledgeService.runAgent(
+                authenticatedUserId(httpRequest), knowledgeBaseId, request, List.of()
+        ));
+    }
+
     private Long authenticatedUserId(HttpServletRequest request) {
         return (Long) request.getAttribute(AuthenticationInterceptor.AUTHENTICATED_USER_ID);
     }
