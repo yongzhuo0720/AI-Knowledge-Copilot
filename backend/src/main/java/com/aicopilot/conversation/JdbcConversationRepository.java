@@ -74,6 +74,25 @@ public class JdbcConversationRepository implements ConversationRepository {
     }
 
     @Override
+    public void updateSessionTitle(Long sessionId, String title) {
+        jdbcTemplate.update(
+                "UPDATE conversation_session SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                title, sessionId
+        );
+    }
+
+    @Override
+    public void deleteSession(Long sessionId) {
+        jdbcTemplate.update(
+                "DELETE FROM conversation_message_source WHERE message_id IN "
+                        + "(SELECT id FROM conversation_message WHERE session_id = ?)",
+                sessionId
+        );
+        jdbcTemplate.update("DELETE FROM conversation_message WHERE session_id = ?", sessionId);
+        jdbcTemplate.update("DELETE FROM conversation_session WHERE id = ?", sessionId);
+    }
+
+    @Override
     public ConversationMessage saveMessage(ConversationMessage message) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {

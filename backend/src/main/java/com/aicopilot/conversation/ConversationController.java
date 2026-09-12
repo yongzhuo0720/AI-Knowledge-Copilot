@@ -6,6 +6,8 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -55,6 +57,28 @@ public class ConversationController {
             HttpServletRequest httpRequest
     ) {
         return ApiResponse.success(conversationService.findMessages(authenticatedUserId(httpRequest), knowledgeBaseId, sessionId));
+    }
+
+    @PatchMapping("/{sessionId}")
+    public ApiResponse<ConversationSession> renameSession(
+            @PathVariable Long knowledgeBaseId,
+            @PathVariable Long sessionId,
+            HttpServletRequest httpRequest,
+            @Valid @RequestBody RenameConversationRequest request
+    ) {
+        return ApiResponse.success(conversationService.renameSession(
+                authenticatedUserId(httpRequest), knowledgeBaseId, sessionId, request
+        ));
+    }
+
+    @DeleteMapping("/{sessionId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteSession(
+            @PathVariable Long knowledgeBaseId,
+            @PathVariable Long sessionId,
+            HttpServletRequest httpRequest
+    ) {
+        conversationService.deleteSession(authenticatedUserId(httpRequest), knowledgeBaseId, sessionId);
     }
 
     @PostMapping("/{sessionId}/messages")

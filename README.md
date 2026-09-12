@@ -215,6 +215,8 @@ Authorization: Bearer <access-token>
 | `POST` | `/api/v1/knowledge-bases/{id}/conversations` | 创建会话 |
 | `GET` | `/api/v1/knowledge-bases/{id}/conversations` | 当前用户会话列表 |
 | `GET` | `/api/v1/knowledge-bases/{id}/conversations/{sessionId}/messages` | 获取消息和引用 |
+| `PATCH` | `/api/v1/knowledge-bases/{id}/conversations/{sessionId}` | 重命名当前用户会话 |
+| `DELETE` | `/api/v1/knowledge-bases/{id}/conversations/{sessionId}` | 删除当前用户会话及消息 |
 | `POST` | `/api/v1/knowledge-bases/{id}/conversations/{sessionId}/messages` | 提问并保存回答 |
 | `POST` | `/api/v1/knowledge-bases/{id}/conversations/{sessionId}/messages/stream` | SSE 流式提问并保存回答 |
 
@@ -372,5 +374,5 @@ docker compose --env-file .\deploy\.env -f .\deploy\docker-compose.yml up --buil
 - 完善工作空间选择器和成员管理页面。
 - 增加 API 集成测试和 Docker Compose 烟囱测试。
 - 增加文档预览、批量上传、解析进度和失败任务监控。
-- 增加会话搜索、重命名和删除能力。
+- 增加会话搜索能力。
 - 增加生产环境部署、HTTPS、审计和细粒度 RBAC。

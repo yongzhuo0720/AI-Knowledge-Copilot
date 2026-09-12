@@ -54,6 +54,21 @@ public class ConversationService {
     }
 
     @Transactional
+    public ConversationSession renameSession(Long userId, Long knowledgeBaseId, Long sessionId,
+                                              RenameConversationRequest request) {
+        findOwnedSession(userId, knowledgeBaseId, sessionId);
+        conversationRepository.updateSessionTitle(sessionId, request.title().trim());
+        return conversationRepository.findSession(sessionId, knowledgeBaseId, userId)
+                .orElseThrow(() -> new AccessDeniedException("user cannot access this conversation"));
+    }
+
+    @Transactional
+    public void deleteSession(Long userId, Long knowledgeBaseId, Long sessionId) {
+        findOwnedSession(userId, knowledgeBaseId, sessionId);
+        conversationRepository.deleteSession(sessionId);
+    }
+
+    @Transactional
     public ConversationReply ask(Long userId, Long knowledgeBaseId, Long sessionId, CreateMessageRequest request) {
         findOwnedSession(userId, knowledgeBaseId, sessionId);
         List<ConversationMessage> history = conversationRepository.findMessages(sessionId);

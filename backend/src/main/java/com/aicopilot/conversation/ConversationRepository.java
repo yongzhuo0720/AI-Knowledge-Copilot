@@ -11,6 +11,10 @@ public interface ConversationRepository {
 
     Optional<ConversationSession> findSession(Long sessionId, Long knowledgeBaseId, Long userId);
 
+    void updateSessionTitle(Long sessionId, String title);
+
+    void deleteSession(Long sessionId);
+
     ConversationMessage saveMessage(ConversationMessage message);
 
     List<ConversationMessage> findMessages(Long sessionId);

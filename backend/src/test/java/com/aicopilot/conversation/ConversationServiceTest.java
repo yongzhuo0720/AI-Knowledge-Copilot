@@ -59,4 +59,37 @@ class ConversationServiceTest {
                 .hasMessage("user cannot access this conversation");
         verify(repository, never()).findMessages(7L);
     }
+
+    @Test
+    void renamesOwnedSession() {
+        ConversationRepository repository = mock(ConversationRepository.class);
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        ConversationSession session = new ConversationSession(7L, 20L, 3L, "旧标题", Instant.now(), Instant.now());
+        ConversationSession renamed = new ConversationSession(7L, 20L, 3L, "研发规范问答", Instant.now(), Instant.now());
+        when(repository.findSession(7L, 20L, 3L)).thenReturn(java.util.Optional.of(session), java.util.Optional.of(renamed));
+
+        ConversationSession result = new ConversationService(repository, knowledgeService, mock(KnowledgeAnswerClient.class))
+                .renameSession(3L, 20L, 7L, new RenameConversationRequest(" 研发规范问答 "));
+
+        assertThat(result.title()).isEqualTo("研发规范问答");
+        verify(repository).updateSessionTitle(7L, "研发规范问答");
+    }
+
+    @Test
+    void deletesOwnedSessionAndDoesNotAllowAnotherUsersSession() {
+        ConversationRepository repository = mock(ConversationRepository.class);
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        when(repository.findSession(7L, 20L, 3L)).thenReturn(java.util.Optional.of(
+                new ConversationSession(7L, 20L, 3L, "产品问答", Instant.now(), Instant.now())
+        ));
+
+        ConversationService service = new ConversationService(repository, knowledgeService, mock(KnowledgeAnswerClient.class));
+        service.deleteSession(3L, 20L, 7L);
+
+        verify(repository).deleteSession(7L);
+        when(repository.findSession(8L, 20L, 99L)).thenReturn(java.util.Optional.empty());
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.deleteSession(99L, 20L, 8L))
+                .isInstanceOf(com.aicopilot.common.exception.AccessDeniedException.class);
+        verify(repository, never()).deleteSession(8L);
+    }
 }

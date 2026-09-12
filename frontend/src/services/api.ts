@@ -341,6 +341,36 @@ export async function listConversationMessages(
   return parseResponse<ConversationMessage[]>(response, '获取会话消息失败')
 }
 
+export async function renameConversation(
+  userId: number,
+  knowledgeBaseId: number,
+  sessionId: number,
+  title: string,
+): Promise<ApiResponse<ConversationSession>> {
+  const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/conversations/${sessionId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
+    body: JSON.stringify({ title }),
+  })
+  return parseResponse<ConversationSession>(response, '重命名会话失败')
+}
+
+export async function deleteConversation(
+  userId: number,
+  knowledgeBaseId: number,
+  sessionId: number,
+): Promise<void> {
+  const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/conversations/${sessionId}`, {
+    method: 'DELETE',
+    headers: userHeaders(userId),
+  })
+  if (!response.ok) {
+    if (response.status === 401) handleAuthenticationFailure()
+    const payload = await response.json().catch(() => null) as ApiResponse<unknown> | null
+    throw new Error(payload?.message ? `删除会话失败：${payload.message}` : `删除会话失败：${response.status}`)
+  }
+}
+
 export async function askConversation(
   userId: number,
   knowledgeBaseId: number,
