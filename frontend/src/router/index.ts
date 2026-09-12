@@ -23,11 +23,16 @@ const router = createRouter({
       name: 'chat',
       component: () => import('@/views/ChatView.vue'),
     },
+    {
+      path: '/retrieval',
+      name: 'retrieval',
+      component: () => import('@/views/RetrievalView.vue'),
+    },
   ],
 })
 
 router.beforeEach((to) => {
-  if ((to.path === '/documents' || to.path === '/chat') && !localStorage.getItem('accessToken')) {
+  if ((to.path === '/documents' || to.path === '/chat' || to.path === '/retrieval') && !localStorage.getItem('accessToken')) {
     return { path: '/knowledge' }
   }
   return true

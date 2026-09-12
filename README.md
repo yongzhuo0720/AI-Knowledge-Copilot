@@ -16,6 +16,7 @@
 - 基于百炼 `text-embedding-v4` 的向量检索。
 - 基于 DeepSeek `deepseek-chat` 的回答生成。
 - 会话历史持久化，回答保存检索来源和引用对象。
+- Retrieval 调试工作台展示真实检索 Chunk、Score、Context、Prompt 和最终回答。
 - Vue 3 工作台：登录、注册、工作空间创建、上传、解析状态、检索和问答。
 
 ## 系统架构
@@ -207,6 +208,8 @@ Authorization: Bearer <access-token>
 | `POST` | `/api/v1/knowledge-bases/{id}/documents/{documentId}/processing-retry` | 重试失败任务 |
 | `POST` | `/api/v1/knowledge-bases/{id}/search` | 检索知识片段 |
 | `POST` | `/api/v1/knowledge-bases/{id}/answer` | 直接生成回答 |
+
+前端 `/retrieval` 页面会串联真实的检索和回答接口，用于观察一次 RAG 请求的输入、命中片段、上下文、Prompt 预览和回答引用。Embedding 卡片显示当前 `text-embedding-v4` 的 1024 维配置；原始向量不在浏览器展示。
 
 ### 会话
 
