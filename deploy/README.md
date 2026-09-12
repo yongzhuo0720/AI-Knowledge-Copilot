@@ -80,7 +80,7 @@ pwsh -File .\deploy\smoke-test.ps1
 pwsh -File .\deploy\smoke-test.ps1 -FilePath .\docs\sample.md
 ```
 
-脚本要求 PowerShell 7+ 的 `Invoke-RestMethod -Form`，并要求 `deploy/.env` 已配置有效的 DeepSeek 和百炼 Key。
+脚本会额外验证重新解析，以及持久化会话中的 Agent 工具轨迹和引用。脚本要求 PowerShell 7+ 的 `Invoke-RestMethod -Form`，并要求 `deploy/.env` 已配置有效的 DeepSeek 和百炼 Key。
 
 任务恢复和重试日志：
 

@@ -48,6 +48,21 @@ function New-SampleFile {
     return $path
 }
 
+function Wait-DocumentCompleted {
+    param(
+        [int]$KnowledgeBaseId,
+        [int]$DocumentId
+    )
+    for ($attempt = 1; $attempt -le 30; $attempt++) {
+        Start-Sleep -Seconds 2
+        $current = Invoke-Api -Method GET -Path "/api/v1/knowledge-bases/$KnowledgeBaseId/documents/$DocumentId/processing-status" -Headers $headers
+        Write-Host "  尝试 $attempt/30：$($current.status)"
+        if ($current.status -eq 'COMPLETED') { return $current }
+        if ($current.status -eq 'FAILED') { throw "文档解析失败：$($current.processingFailureReason)" }
+    }
+    throw '文档在 60 秒内没有完成解析'
+}
+
 if (-not $FilePath) {
     $FilePath = New-SampleFile
 }
@@ -75,26 +90,30 @@ $knowledgeBase = Invoke-Api -Method POST -Path '/api/v1/knowledge-bases' -Header
 Write-Host "4/7 上传文档：$FilePath"
 $document = Invoke-Api -Method POST -Path "/api/v1/knowledge-bases/$($knowledgeBase.id)/documents/upload" -Headers $headers -Form @{ file = Get-Item -LiteralPath $FilePath }
 
-Write-Host '5/7 等待文档解析和向量索引'
-$status = $null
-for ($attempt = 1; $attempt -le 30; $attempt++) {
-    Start-Sleep -Seconds 2
-    $status = Invoke-Api -Method GET -Path "/api/v1/knowledge-bases/$($knowledgeBase.id)/documents/$($document.id)/processing-status" -Headers $headers
-    Write-Host "  尝试 $attempt/30：$($status.status)"
-    if ($status.status -eq 'COMPLETED') { break }
-    if ($status.status -eq 'FAILED') { throw "文档解析失败：$($status.processingFailureReason)" }
-}
-if ($status.status -ne 'COMPLETED') { throw '文档在 60 秒内没有完成解析' }
+Write-Host '5/9 等待文档解析和向量索引'
+Wait-DocumentCompleted -KnowledgeBaseId $knowledgeBase.id -DocumentId $document.id | Out-Null
 
-Write-Host '6/7 检索并生成回答'
+Write-Host '6/9 检索并生成回答'
 $search = Invoke-Api -Method POST -Path "/api/v1/knowledge-bases/$($knowledgeBase.id)/search" -Headers $headers -Body @{ query = '发布流程'; limit = 5 }
 if (-not $search -or $search.Count -lt 1) { throw '检索没有返回引用片段' }
 $answer = Invoke-Api -Method POST -Path "/api/v1/knowledge-bases/$($knowledgeBase.id)/answer" -Headers $headers -Body @{ question = '发布流程是什么？' }
 if ([string]::IsNullOrWhiteSpace($answer.answer)) { throw '回答内容为空' }
 if (-not $answer.sources -or $answer.sources.Count -lt 1) { throw '回答没有返回引用来源' }
 
-Write-Host '7/7 端到端验证通过' -ForegroundColor Green
+Write-Host '7/9 重新解析并确认向量可重建'
+Invoke-Api -Method POST -Path "/api/v1/knowledge-bases/$($knowledgeBase.id)/documents/$($document.id)/reparse" -Headers $headers | Out-Null
+Wait-DocumentCompleted -KnowledgeBaseId $knowledgeBase.id -DocumentId $document.id | Out-Null
+
+Write-Host '8/9 运行 Agent 会话并确认工具轨迹和引用'
+$session = Invoke-Api -Method POST -Path "/api/v1/knowledge-bases/$($knowledgeBase.id)/conversations" -Headers $headers -Body @{ title = 'Smoke Agent' }
+$agentReply = Invoke-Api -Method POST -Path "/api/v1/knowledge-bases/$($knowledgeBase.id)/conversations/$($session.id)/agent-messages" -Headers $headers -Body @{ question = '请根据文档说明发布流程' }
+if ([string]::IsNullOrWhiteSpace($agentReply.assistantMessage.content)) { throw 'Agent 回答内容为空' }
+if (-not $agentReply.assistantMessage.sources -or $agentReply.assistantMessage.sources.Count -lt 1) { throw 'Agent 回答没有返回引用来源' }
+if (-not $agentReply.assistantMessage.agentSteps -or $agentReply.assistantMessage.agentSteps.Count -lt 1) { throw 'Agent 没有返回工具调用轨迹' }
+
+Write-Host '9/9 端到端验证通过' -ForegroundColor Green
 Write-Host "知识库：$($knowledgeBase.name)（#$($knowledgeBase.id)）"
 Write-Host "文档：$($document.originalFilename)（#$($document.id)）"
 Write-Host "引用数：$($answer.sources.Count)"
+Write-Host "Agent 工具调用数：$($agentReply.assistantMessage.agentSteps.Count)"
 Write-Host "回答：$($answer.answer)"
