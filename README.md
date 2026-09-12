@@ -325,6 +325,15 @@ Docker 端到端成功标准：
 - 失败任务展示失败原因并支持重试。
 - 重新解析后仍能检索到该文档。
 
+也可以直接运行部署后的 API 冒烟验证：
+
+```powershell
+cd D:\ai_project\AI_agent
+pwsh -File .\deploy\smoke-test.ps1
+```
+
+脚本会自动创建临时账号和测试数据，并验证文档上传、解析、检索、回答和引用；模型密钥只从本地 `deploy/.env` 进入容器，不会写入脚本或 Git。
+
 ## 常见问题
 
 ### `couldn't find env file`
@@ -384,4 +393,5 @@ docker compose --env-file .\deploy\.env -f .\deploy\docker-compose.yml up --buil
 - 增加文档预览、批量上传、解析进度和失败任务监控。
 - 增加会话搜索能力。
 - 增加更多受权限保护的 Agent 工具和执行历史。
+- 提供不含密钥的 Docker API 端到端冒烟脚本。
 - 增加生产环境部署、HTTPS、审计和细粒度 RBAC。

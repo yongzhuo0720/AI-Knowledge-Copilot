@@ -67,6 +67,21 @@ DASHSCOPE_API_KEY=
 8. 点击“生成回答”，确认回答非空且有来源引用。
 9. 点击“重新解析”，确认任务重新完成且仍可检索。
 
+也可以使用自动化冒烟脚本验证完整 API 链路。脚本会创建临时账号、工作空间、知识库和 Markdown 文档，不会读取或提交模型密钥：
+
+```powershell
+cd D:\ai_project\AI_agent
+pwsh -File .\deploy\smoke-test.ps1
+```
+
+如果使用自定义文档：
+
+```powershell
+pwsh -File .\deploy\smoke-test.ps1 -FilePath .\docs\sample.md
+```
+
+脚本要求 PowerShell 7+ 的 `Invoke-RestMethod -Form`，并要求 `deploy/.env` 已配置有效的 DeepSeek 和百炼 Key。
+
 任务恢复和重试日志：
 
 ```powershell
