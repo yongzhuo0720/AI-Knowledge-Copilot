@@ -348,3 +348,48 @@ export async function askConversation(
   )
   return parseResponse<ConversationReply>(response, '会话问答失败')
 }
+
+export type ConversationStreamEvent =
+  | { event: 'user'; data: ConversationMessage }
+  | { event: 'delta'; data: { content: string } }
+  | { event: 'sources'; data: { sources: KnowledgeRetrievalChunk[] } }
+  | { event: 'complete'; data: ConversationReply }
+  | { event: 'error'; data: { message: string } }
+
+export async function streamConversation(
+  userId: number,
+  knowledgeBaseId: number,
+  sessionId: number,
+  question: string,
+  signal: AbortSignal,
+  onEvent: (event: ConversationStreamEvent) => void,
+): Promise<void> {
+  const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/conversations/${sessionId}/messages/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...userHeaders(userId) },
+    body: JSON.stringify({ question }),
+    signal,
+  })
+  if (!response.ok || !response.body) {
+    const payload = await response.json().catch(() => null) as ApiResponse<unknown> | null
+    throw new Error(payload?.message ? `流式问答失败：${payload.message}` : `流式问答失败：${response.status}`)
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  const consume = (block: string) => {
+    const eventName = block.match(/^event:\s*(.+)$/m)?.[1]?.trim()
+    const dataLine = block.match(/^data:\s*(.+)$/m)?.[1]
+    if (!eventName || !dataLine) return
+    onEvent({ event: eventName, data: JSON.parse(dataLine) } as ConversationStreamEvent)
+  }
+  while (true) {
+    const { value, done } = await reader.read()
+    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done })
+    const blocks = buffer.split('\n\n')
+    buffer = blocks.pop() ?? ''
+    blocks.filter(Boolean).forEach(consume)
+    if (done) break
+  }
+  if (buffer.trim()) consume(buffer)
+}

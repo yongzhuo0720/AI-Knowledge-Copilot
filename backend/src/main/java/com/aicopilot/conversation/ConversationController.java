@@ -12,10 +12,12 @@ import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import jakarta.servlet.http.HttpServletRequest;
 import com.aicopilot.user.AuthenticationInterceptor;
 
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
 @RestController
 @RequestMapping("/api/v1/knowledge-bases/{knowledgeBaseId}/conversations")
@@ -63,6 +65,36 @@ public class ConversationController {
             @Valid @RequestBody CreateMessageRequest request
     ) {
         return ApiResponse.success(conversationService.ask(authenticatedUserId(httpRequest), knowledgeBaseId, sessionId, request));
+    }
+
+    @PostMapping(value = "/{sessionId}/messages/stream", produces = "text/event-stream")
+    public SseEmitter stream(
+            @PathVariable Long knowledgeBaseId,
+            @PathVariable Long sessionId,
+            HttpServletRequest httpRequest,
+            @Valid @RequestBody CreateMessageRequest request
+    ) {
+        Long userId = authenticatedUserId(httpRequest);
+        SseEmitter emitter = new SseEmitter(120_000L);
+        CompletableFuture.runAsync(() -> {
+            try {
+                conversationService.streamAsk(userId, knowledgeBaseId, sessionId, request, event -> {
+                    try {
+                        emitter.send(SseEmitter.event().name(event.event()).data(event.data()));
+                    } catch (Exception exception) {
+                        throw new IllegalStateException("client disconnected", exception);
+                    }
+                });
+                emitter.complete();
+            } catch (Exception exception) {
+                try {
+                    emitter.send(SseEmitter.event().name("error").data(java.util.Map.of("message", exception.getMessage() == null ? "stream failed" : exception.getMessage())));
+                } catch (Exception ignored) {
+                }
+                emitter.completeWithError(exception);
+            }
+        });
+        return emitter;
     }
 
     private Long authenticatedUserId(HttpServletRequest request) {

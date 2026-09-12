@@ -4,10 +4,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+import json
 
 from app.indexing import count_chunks, retrieve_chunks
-from app.answering import answer_question
+from app.answering import answer_question, stream_answer_question
 from app.processing import get_parse_task, process_parse_task, recover_parse_tasks, retry_parse_task, submit_parse_task
 from app.schemas import AnswerRequest, ParseDocumentRequest, RetrievalRequest
 from app.settings import settings
@@ -101,6 +102,17 @@ def retrieval_stats(knowledge_base_ids: str = Query(default="")) -> dict[str, ob
 def answer_knowledge_question(request: AnswerRequest) -> dict[str, object]:
     history = [message.model_dump() for message in request.history]
     return {"code": "0", "message": "success", "data": answer_question(request.knowledge_base_id, request.question, history)}
+
+
+@app.post("/api/v1/answers/stream")
+def stream_knowledge_question(request: AnswerRequest) -> StreamingResponse:
+    history = [message.model_dump() for message in request.history]
+
+    def events():
+        for item in stream_answer_question(request.knowledge_base_id, request.question, history):
+            yield f"event: {item['event']}\ndata: {json.dumps(item['data'], ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 async def _recover_tasks_loop() -> None:

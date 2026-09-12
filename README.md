@@ -215,6 +215,9 @@ Authorization: Bearer <access-token>
 | `GET` | `/api/v1/knowledge-bases/{id}/conversations` | 当前用户会话列表 |
 | `GET` | `/api/v1/knowledge-bases/{id}/conversations/{sessionId}/messages` | 获取消息和引用 |
 | `POST` | `/api/v1/knowledge-bases/{id}/conversations/{sessionId}/messages` | 提问并保存回答 |
+| `POST` | `/api/v1/knowledge-bases/{id}/conversations/{sessionId}/messages/stream` | SSE 流式提问并保存回答 |
+
+流式接口返回 `text/event-stream`，事件顺序通常为 `user`、多个 `delta`、`sources`、`complete`。前端停止生成时会中断 HTTP 请求，未完成的助手回答不会写入会话历史。Docker Nginx 已关闭代理缓冲，避免 SSE 被网关聚合后一次性返回。
 
 ### AI Service 内部接口
 
@@ -227,6 +230,9 @@ Authorization: Bearer <access-token>
 | `POST` | `/api/v1/retrieval/search` | 向量检索 |
 | `GET` | `/api/v1/retrieval/stats?knowledge_base_ids={ids}` | 查询 Milvus 已索引 Chunk 数 |
 | `POST` | `/api/v1/answers` | 模型回答 |
+| `POST` | `/api/v1/answers/stream` | SSE 流式模型回答 |
+
+AI Service 流式回答同样返回 `text/event-stream`，事件包括 `sources`、多个 `delta` 和 `complete`；异常由 Backend 统一转发为 `error` 事件。
 
 ## 配置说明
 

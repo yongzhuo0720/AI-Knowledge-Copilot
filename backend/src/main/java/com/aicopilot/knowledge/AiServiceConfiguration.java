@@ -17,6 +17,9 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.function.Consumer;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 
 @Configuration
 @Profile("local")
@@ -92,7 +95,9 @@ public class AiServiceConfiguration {
     KnowledgeAnswerClient knowledgeAnswerClient(
             AiServiceProperties properties, ObjectMapper objectMapper
     ) {
-        return (knowledgeBaseId, question, history) -> {
+        return new KnowledgeAnswerClient() {
+            @Override
+            public KnowledgeAnswer answer(Long knowledgeBaseId, String question, List<ConversationMessage> history) {
             if (!properties.isEnabled()) return new KnowledgeAnswer("AI service is disabled", List.of());
             HttpURLConnection connection = null;
             try {
@@ -124,7 +129,7 @@ public class AiServiceConfiguration {
                     if (!"0".equals(response.path("code").asText()) || !data.isObject()) {
                         throw new IllegalStateException("AI service rejected answer request");
                     }
-                    return new KnowledgeAnswer(
+            return new KnowledgeAnswer(
                             data.path("answer").asText(),
                             toRetrievalChunks(data.path("sources"))
                     );
@@ -134,6 +139,73 @@ public class AiServiceConfiguration {
             } finally {
                 if (connection != null) {
                     connection.disconnect();
+                }
+            }
+            }
+
+            @Override
+            public KnowledgeAnswer stream(Long knowledgeBaseId, String question, List<ConversationMessage> history,
+                                          Consumer<String> onDelta) {
+                if (!properties.isEnabled()) {
+                    String fallback = "AI service is disabled";
+                    onDelta.accept(fallback);
+                    return new KnowledgeAnswer(fallback, List.of());
+                }
+                HttpURLConnection connection = null;
+                try {
+                    connection = (HttpURLConnection) new URL(
+                            properties.getBaseUrl() + "/api/v1/answers/stream"
+                    ).openConnection();
+                    connection.setConnectTimeout(10_000);
+                    connection.setReadTimeout(90_000);
+                    connection.setRequestMethod("POST");
+                    connection.setDoOutput(true);
+                    connection.setRequestProperty("Content-Type", MediaType.APPLICATION_JSON_VALUE);
+                    byte[] payload = objectMapper.writeValueAsBytes(new AiServiceAnswerRequest(
+                            knowledgeBaseId,
+                            question,
+                            history.stream()
+                                    .map(message -> new AiServiceHistoryMessage(message.role(), message.content()))
+                                    .toList()
+                    ));
+                    connection.setFixedLengthStreamingMode(payload.length);
+                    try (var outputStream = connection.getOutputStream()) {
+                        outputStream.write(payload);
+                    }
+                    if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
+                        throw new IllegalStateException("AI service rejected streaming answer request");
+                    }
+                    List<KnowledgeRetrievalChunk> sources = List.of();
+                    StringBuilder answer = new StringBuilder();
+                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
+                        String line;
+                        String event = null;
+                        while ((line = reader.readLine()) != null) {
+                            if (line.startsWith("event:")) {
+                                event = line.substring(6).trim();
+                            } else if (line.startsWith("data:") && event != null) {
+                                JsonNode data = objectMapper.readTree(line.substring(5).trim());
+                                if ("delta".equals(event)) {
+                                    String content = data.path("content").asText("");
+                                    if (!content.isEmpty()) {
+                                        answer.append(content);
+                                        onDelta.accept(content);
+                                    }
+                                } else if ("sources".equals(event)) {
+                                    sources = toRetrievalChunks(data.path("sources"));
+                                } else if ("complete".equals(event)) {
+                                    if (data.has("answer")) answer = new StringBuilder(data.path("answer").asText());
+                                    sources = toRetrievalChunks(data.path("sources"));
+                                }
+                                event = null;
+                            }
+                        }
+                    }
+                    return new KnowledgeAnswer(answer.toString(), sources);
+                } catch (IOException exception) {
+                    throw new IllegalStateException("failed to stream knowledge question", exception);
+                } finally {
+                    if (connection != null) connection.disconnect();
                 }
             }
         };

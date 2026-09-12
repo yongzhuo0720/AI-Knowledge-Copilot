@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.function.Consumer;
 
 @Service
 @Profile("local")
@@ -65,6 +66,27 @@ public class ConversationService {
         ));
         conversationRepository.touchSession(sessionId);
         return new ConversationReply(userMessage, assistantMessage);
+    }
+
+    @Transactional
+    public void streamAsk(Long userId, Long knowledgeBaseId, Long sessionId, CreateMessageRequest request,
+                          Consumer<ConversationStreamEvent> onEvent) {
+        findOwnedSession(userId, knowledgeBaseId, sessionId);
+        List<ConversationMessage> history = conversationRepository.findMessages(sessionId);
+        String question = request.question().trim();
+        ConversationMessage userMessage = conversationRepository.saveMessage(new ConversationMessage(
+                null, sessionId, "USER", question, Instant.now(), List.of()
+        ));
+        onEvent.accept(new ConversationStreamEvent("user", userMessage));
+        KnowledgeAnswer answer = answerClient.stream(knowledgeBaseId, question, history, delta ->
+                onEvent.accept(new ConversationStreamEvent("delta", java.util.Map.of("content", delta)))
+        );
+        onEvent.accept(new ConversationStreamEvent("sources", java.util.Map.of("sources", answer.sources())));
+        ConversationMessage assistantMessage = conversationRepository.saveMessage(new ConversationMessage(
+                null, sessionId, "ASSISTANT", answer.answer(), Instant.now(), answer.sources()
+        ));
+        conversationRepository.touchSession(sessionId);
+        onEvent.accept(new ConversationStreamEvent("complete", new ConversationReply(userMessage, assistantMessage)));
     }
 
     private ConversationSession findOwnedSession(Long userId, Long knowledgeBaseId, Long sessionId) {
