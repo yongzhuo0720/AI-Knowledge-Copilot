@@ -176,6 +176,7 @@ Authorization: Bearer <access-token>
 - 会话按 `knowledgeBaseId + userId` 隔离。
 - 缺少或无效 Token 返回 `401 AUTHENTICATION_REQUIRED`。
 - 非成员访问返回 `403 ACCESS_DENIED`。
+- 前端收到 `401` 会清理本地登录态，并自动回到登录入口。
 - 前端不会使用 `X-User-Id` 作为身份来源。
 
 ## API 速查

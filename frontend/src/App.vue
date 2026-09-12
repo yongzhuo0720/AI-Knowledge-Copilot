@@ -60,7 +60,10 @@ function syncAuthState() {
   accessToken.value = localStorage.getItem('accessToken')
   currentUser.value = readStoredUser()
   if (isAuthenticated.value) void loadWorkspaces()
-  else workspaces.value = []
+  else {
+    workspaces.value = []
+    if (route.path !== '/knowledge') void router.replace('/knowledge')
+  }
 }
 
 function selectWorkspace() {

@@ -128,9 +128,18 @@ function userHeaders(userId: number): HeadersInit {
 async function parseResponse<T>(response: Response, fallback: string): Promise<ApiResponse<T>> {
   const payload = await response.json().catch(() => null) as ApiResponse<T> | null
   if (!response.ok) {
+    if (response.status === 401) handleAuthenticationFailure()
     throw new Error(payload?.message ? `${fallback}：${payload.message}` : `${fallback}：${response.status}`)
   }
   return payload as ApiResponse<T>
+}
+
+function handleAuthenticationFailure() {
+  if (!localStorage.getItem('accessToken')) return
+  localStorage.removeItem('accessToken')
+  localStorage.removeItem('currentUser')
+  localStorage.removeItem('activeWorkspaceId')
+  window.dispatchEvent(new Event('aicopilot-auth-changed'))
 }
 
 export async function login(email: string, password: string): Promise<ApiResponse<LoginResponse>> {
@@ -371,6 +380,7 @@ export async function streamConversation(
     signal,
   })
   if (!response.ok || !response.body) {
+    if (response.status === 401) handleAuthenticationFailure()
     const payload = await response.json().catch(() => null) as ApiResponse<unknown> | null
     throw new Error(payload?.message ? `流式问答失败：${payload.message}` : `流式问答失败：${response.status}`)
   }
