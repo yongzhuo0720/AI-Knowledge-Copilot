@@ -178,4 +178,26 @@ class KnowledgeServiceTest {
         assertThat(service.findDocuments(7L, 20L)).isEmpty();
         verify(repository).findDocuments(20L);
     }
+
+    @Test
+    void rejectsWorkspaceDocumentAccessForNonMember() {
+        KnowledgeRepository repository = mock(KnowledgeRepository.class);
+        WorkspaceRepository workspaceRepository = mock(WorkspaceRepository.class);
+        when(workspaceRepository.isMember(10L, 99L)).thenReturn(false);
+
+        KnowledgeService service = new KnowledgeService(
+                repository,
+                mock(DocumentProcessingClient.class),
+                mock(ObjectStorageService.class),
+                mock(KnowledgeRetrievalClient.class),
+                mock(KnowledgeAnswerClient.class),
+                workspaceRepository
+        );
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        service.findWorkspaceDocuments(99L, 10L, null, null, null))
+                .isInstanceOf(com.aicopilot.common.exception.AccessDeniedException.class);
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never())
+                .findDocumentsForWorkspace(10L, null, null, null);
+    }
 }

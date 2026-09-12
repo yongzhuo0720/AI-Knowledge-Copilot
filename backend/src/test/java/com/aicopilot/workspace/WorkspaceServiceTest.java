@@ -85,4 +85,15 @@ class WorkspaceServiceTest {
         assertThat(new WorkspaceService(repository).findForUser(7L))
                 .containsExactly(new WorkspaceResponse(10L, "研发空间", 7L));
     }
+
+    @Test
+    void rejectsWorkspaceCreationForAnotherOwner() {
+        WorkspaceRepository repository = mock(WorkspaceRepository.class);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        new WorkspaceService(repository).create(7L, new CreateWorkspaceRequest("研发空间", 8L)))
+                .isInstanceOf(AccessDeniedException.class)
+                .hasMessage("workspace owner must match authenticated user");
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).save(any());
+    }
 }
