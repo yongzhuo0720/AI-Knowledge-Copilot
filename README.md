@@ -330,7 +330,7 @@ Docker 端到端成功标准：
 
 ```powershell
 cd D:\ai_project\AI_agent
-pwsh -File .\deploy\smoke-test.ps1
+powershell -ExecutionPolicy Bypass -File .\deploy\smoke-test.ps1
 ```
 
 脚本会自动创建临时账号和测试数据，并验证文档上传、解析、检索、回答和引用；模型密钥只从本地 `deploy/.env` 进入容器，不会写入脚本或 Git。

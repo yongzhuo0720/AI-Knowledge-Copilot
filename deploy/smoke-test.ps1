@@ -38,6 +38,40 @@ function Invoke-Api {
     return $response.data
 }
 
+function Invoke-MultipartApi {
+    param(
+        [string]$Path,
+        [hashtable]$Headers,
+        [string]$UploadPath
+    )
+    Add-Type -AssemblyName System.Net.Http
+    $client = New-Object System.Net.Http.HttpClient
+    $fileStream = $null
+    $multipart = $null
+    try {
+        if ($Headers.Authorization) {
+            $client.DefaultRequestHeaders.TryAddWithoutValidation('Authorization', $Headers.Authorization) | Out-Null
+        }
+        $multipart = New-Object System.Net.Http.MultipartFormDataContent
+        $fileStream = [System.IO.File]::OpenRead($UploadPath)
+        $fileContent = New-Object System.Net.Http.StreamContent($fileStream)
+        $multipart.Add($fileContent, 'file', [System.IO.Path]::GetFileName($UploadPath))
+        $httpResponse = $client.PostAsync("$BaseUrl$Path", $multipart).Result
+        $response = ($httpResponse.Content.ReadAsStringAsync().Result | ConvertFrom-Json)
+        if (-not $httpResponse.IsSuccessStatusCode) {
+            throw "HTTP $([int]$httpResponse.StatusCode)：$($response.message)"
+        }
+        if ($response.code -ne '0') {
+            throw "接口返回失败：$($response.message)"
+        }
+        return $response.data
+    } finally {
+        if ($null -ne $fileStream) { $fileStream.Dispose() }
+        if ($null -ne $multipart) { $multipart.Dispose() }
+        $client.Dispose()
+    }
+}
+
 function New-SampleFile {
     $path = Join-Path ([System.IO.Path]::GetTempPath()) "ai-copilot-smoke-$([Guid]::NewGuid()).md"
     @'
@@ -88,7 +122,7 @@ $workspace = Invoke-Api -Method POST -Path '/api/v1/workspaces' -Headers $header
 $knowledgeBase = Invoke-Api -Method POST -Path '/api/v1/knowledge-bases' -Headers $headers -Body @{ workspaceId = $workspace.id; name = 'Smoke Knowledge Base'; description = 'Automated end-to-end verification' }
 
 Write-Host "4/7 上传文档：$FilePath"
-$document = Invoke-Api -Method POST -Path "/api/v1/knowledge-bases/$($knowledgeBase.id)/documents/upload" -Headers $headers -Form @{ file = Get-Item -LiteralPath $FilePath }
+$document = Invoke-MultipartApi -Path "/api/v1/knowledge-bases/$($knowledgeBase.id)/documents/upload" -Headers $headers -UploadPath $FilePath
 
 Write-Host '5/9 等待文档解析和向量索引'
 Wait-DocumentCompleted -KnowledgeBaseId $knowledgeBase.id -DocumentId $document.id | Out-Null
