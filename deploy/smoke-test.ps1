@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$BaseUrl = 'http://localhost',
     [string]$FilePath = ''
@@ -74,11 +74,12 @@ function Invoke-MultipartApi {
 
 function New-SampleFile {
     $path = Join-Path ([System.IO.Path]::GetTempPath()) "ai-copilot-smoke-$([Guid]::NewGuid()).md"
-    @'
-# AI Knowledge Copilot smoke test
-
-发布流程：先在工作空间创建知识库，然后上传文档，等待解析状态变为 COMPLETED，最后使用知识库进行检索和问答。
-'@ | Set-Content -LiteralPath $path -Encoding UTF8
+    $content = @(
+        '# AI Knowledge Copilot smoke test'
+        ''
+        '发布流程：先在工作空间创建知识库，然后上传文档，等待解析状态变为 COMPLETED，最后使用知识库进行检索和问答。'
+    )
+    Set-Content -LiteralPath $path -Value $content -Encoding UTF8
     return $path
 }
 
