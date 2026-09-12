@@ -189,6 +189,7 @@ Authorization: Bearer <access-token>
 | `POST` | `/api/v1/workspaces` | 创建工作空间 | 是 |
 | `GET` | `/api/v1/workspaces` | 获取当前用户可访问的工作空间 | 是 |
 | `GET` | `/api/v1/workspaces/{workspaceId}/overview` | 获取 Workspace 统计、最近知识库、文档和会话 | 是 |
+| `GET` | `/api/v1/workspaces/{workspaceId}/documents` | 获取 Workspace 文档，可按文件名、状态和知识库筛选 | 是 |
 | `GET` | `/api/v1/workspaces/{workspaceId}/members` | 查看成员 | 是 |
 | `POST` | `/api/v1/workspaces/{workspaceId}/members` | 添加成员 | OWNER/ADMIN |
 

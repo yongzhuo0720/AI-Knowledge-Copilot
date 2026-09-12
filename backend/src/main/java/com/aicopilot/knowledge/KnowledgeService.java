@@ -160,6 +160,13 @@ public class KnowledgeService {
     }
 
     @Transactional(readOnly = true)
+    public List<WorkspaceDocumentResponse> findWorkspaceDocuments(Long userId, Long workspaceId, String query,
+                                                                   String status, Long knowledgeBaseId) {
+        authorizeWorkspace(workspaceId, userId);
+        return knowledgeRepository.findDocumentsForWorkspace(workspaceId, query, status, knowledgeBaseId);
+    }
+
+    @Transactional(readOnly = true)
     public List<KnowledgeRetrievalChunk> search(Long knowledgeBaseId, KnowledgeSearchRequest request) {
         return search(null, knowledgeBaseId, request);
     }

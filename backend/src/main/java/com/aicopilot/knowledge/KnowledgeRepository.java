@@ -14,6 +14,9 @@ public interface KnowledgeRepository {
 
     List<KnowledgeDocument> findDocuments(Long knowledgeBaseId);
 
+    List<WorkspaceDocumentResponse> findDocumentsForWorkspace(Long workspaceId, String query, String status,
+                                                               Long knowledgeBaseId);
+
     java.util.Optional<KnowledgeDocument> findDocument(Long knowledgeBaseId, Long documentId);
 
     void updateProcessingStatus(Long documentId, String processingTaskId, String status);

@@ -26,6 +26,21 @@ export interface KnowledgeDocument {
   processingRetryCount?: number
 }
 
+export interface WorkspaceDocument {
+  id: number
+  knowledgeBaseId: number
+  knowledgeBaseName: string
+  originalFilename: string
+  objectKey: string
+  contentType: string
+  fileSize: number
+  status: string
+  processingTaskId: string | null
+  createdAt: string
+  processingFailureReason?: string | null
+  processingRetryCount?: number
+}
+
 export interface KnowledgeRetrievalChunk {
   documentObjectKey: string
   content: string
@@ -210,6 +225,20 @@ export async function uploadDocument(
 export async function listDocuments(userId: number, knowledgeBaseId: number): Promise<ApiResponse<KnowledgeDocument[]>> {
   const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents`, { headers: userHeaders(userId) })
   return parseResponse<KnowledgeDocument[]>(response, '获取文档列表失败')
+}
+
+export async function listWorkspaceDocuments(
+  userId: number,
+  workspaceId: number,
+  filters: { query?: string; status?: string; knowledgeBaseId?: number } = {},
+): Promise<ApiResponse<WorkspaceDocument[]>> {
+  const params = new URLSearchParams()
+  if (filters.query?.trim()) params.set('query', filters.query.trim())
+  if (filters.status && filters.status !== 'ALL') params.set('status', filters.status)
+  if (filters.knowledgeBaseId) params.set('knowledgeBaseId', String(filters.knowledgeBaseId))
+  const queryString = params.toString()
+  const response = await fetch(`/api/v1/workspaces/${workspaceId}/documents${queryString ? `?${queryString}` : ''}`, { headers: userHeaders(userId) })
+  return parseResponse<WorkspaceDocument[]>(response, '获取 Workspace 文档失败')
 }
 
 export async function refreshDocumentProcessingStatus(

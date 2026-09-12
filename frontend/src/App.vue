@@ -24,15 +24,15 @@ const workspaceError = ref('')
 const isAuthenticated = computed(() => Boolean(accessToken.value && currentUser.value))
 const showShell = computed(() => isAuthenticated.value)
 const activeWorkspace = computed(() => workspaces.value.find((workspace) => String(workspace.id) === activeWorkspaceId.value))
-const routeTitle = computed(() => route.path === '/knowledge' ? 'Knowledge workspace' : 'Workspace overview')
+const routeTitle = computed(() => route.path === '/knowledge' ? 'Knowledge workspace' : route.path === '/documents' ? 'Document library' : 'Workspace overview')
 
 const primaryNavigation = [
   { label: 'Overview', caption: '工作空间总览', to: '/' },
   { label: 'Knowledge Base', caption: '知识库与问答', to: '/knowledge' },
+  { label: 'Documents', caption: '文档资产管理', to: '/documents' },
 ]
 
 const plannedNavigation = [
-  { label: 'Documents', caption: '文档资产管理' },
   { label: 'AI Chat', caption: '会话与来源' },
   { label: 'Retrieval', caption: '检索链路调试' },
   { label: 'Agents', caption: 'Agent 与工具' },

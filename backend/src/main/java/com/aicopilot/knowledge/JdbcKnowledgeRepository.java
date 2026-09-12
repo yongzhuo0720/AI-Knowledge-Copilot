@@ -146,6 +146,46 @@ public class JdbcKnowledgeRepository implements KnowledgeRepository {
     }
 
     @Override
+    public List<WorkspaceDocumentResponse> findDocumentsForWorkspace(Long workspaceId, String query, String status,
+                                                                       Long knowledgeBaseId) {
+        StringBuilder sql = new StringBuilder(
+                "SELECT d.id, d.knowledge_base_id, k.name AS knowledge_base_name, d.original_filename, "
+                        + "d.object_key, d.content_type, d.file_size, d.status, d.processing_task_id, d.created_at, "
+                        + "t.failure_reason, t.retry_count FROM knowledge_document d "
+                        + "INNER JOIN knowledge_base k ON k.id = d.knowledge_base_id "
+                        + "LEFT JOIN document_processing_task t ON t.task_id = d.processing_task_id "
+                        + "WHERE k.workspace_id = ?"
+        );
+        List<Object> parameters = new java.util.ArrayList<>();
+        parameters.add(workspaceId);
+        if (query != null && !query.isBlank()) {
+            sql.append(" AND LOWER(d.original_filename) LIKE ?");
+            parameters.add("%" + query.trim().toLowerCase() + "%");
+        }
+        if (status != null && !status.isBlank() && !"ALL".equalsIgnoreCase(status)) {
+            sql.append(" AND d.status = ?");
+            parameters.add(status.trim().toUpperCase());
+        }
+        if (knowledgeBaseId != null) {
+            sql.append(" AND d.knowledge_base_id = ?");
+            parameters.add(knowledgeBaseId);
+        }
+        sql.append(" ORDER BY d.created_at DESC, d.id DESC");
+        return jdbcTemplate.query(
+                sql.toString(),
+                (resultSet, rowNumber) -> new WorkspaceDocumentResponse(
+                        resultSet.getLong("id"), resultSet.getLong("knowledge_base_id"),
+                        resultSet.getString("knowledge_base_name"), resultSet.getString("original_filename"),
+                        resultSet.getString("object_key"), resultSet.getString("content_type"),
+                        resultSet.getLong("file_size"), resultSet.getString("status"),
+                        resultSet.getString("processing_task_id"), toInstant(resultSet.getTimestamp("created_at")),
+                        resultSet.getString("failure_reason"), resultSet.getInt("retry_count")
+                ),
+                parameters.toArray()
+        );
+    }
+
+    @Override
     public java.util.Optional<KnowledgeDocument> findDocument(Long knowledgeBaseId, Long documentId) {
         List<KnowledgeDocument> documents = jdbcTemplate.query(
                 "SELECT d.id, d.knowledge_base_id, d.original_filename, d.object_key, d.content_type, d.file_size, "
