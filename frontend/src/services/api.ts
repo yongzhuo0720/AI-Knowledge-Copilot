@@ -229,18 +229,17 @@ export async function createWorkspace(userId: number, name: string): Promise<Api
   return parseResponse<Workspace>(response, '创建工作空间失败')
 }
 
-export async function listWorkspaces(userId: number): Promise<ApiResponse<Workspace[]>> {
+export async function listWorkspaces(): Promise<ApiResponse<Workspace[]>> {
   const response = await fetch('/api/v1/workspaces', { headers: userHeaders() })
   return parseResponse<Workspace[]>(response, '获取工作空间失败')
 }
 
-export async function listWorkspaceMembers(userId: number, workspaceId: number): Promise<ApiResponse<WorkspaceMember[]>> {
+export async function listWorkspaceMembers(workspaceId: number): Promise<ApiResponse<WorkspaceMember[]>> {
   const response = await fetch(`/api/v1/workspaces/${workspaceId}/members`, { headers: userHeaders() })
   return parseResponse<WorkspaceMember[]>(response, '获取工作空间成员失败')
 }
 
 export async function addWorkspaceMember(
-  userId: number,
   workspaceId: number,
   memberUserId: number,
   role: WorkspaceMember['role'],
@@ -253,13 +252,12 @@ export async function addWorkspaceMember(
   return parseResponse<WorkspaceMember>(response, '添加工作空间成员失败')
 }
 
-export async function getWorkspaceOverview(userId: number, workspaceId: number): Promise<ApiResponse<WorkspaceOverview>> {
+export async function getWorkspaceOverview(workspaceId: number): Promise<ApiResponse<WorkspaceOverview>> {
   const response = await fetch(`/api/v1/workspaces/${workspaceId}/overview`, { headers: userHeaders() })
   return parseResponse<WorkspaceOverview>(response, '获取工作空间概览失败')
 }
 
 export async function createKnowledgeBase(
-  userId: number,
   workspaceId: number,
   name: string,
   description: string,
@@ -272,13 +270,12 @@ export async function createKnowledgeBase(
   return parseResponse<KnowledgeBase>(response, '创建知识库失败')
 }
 
-export async function listKnowledgeBases(userId: number, workspaceId: number): Promise<ApiResponse<KnowledgeBase[]>> {
+export async function listKnowledgeBases(workspaceId: number): Promise<ApiResponse<KnowledgeBase[]>> {
   const response = await fetch(`/api/v1/knowledge-bases?workspaceId=${workspaceId}`, { headers: userHeaders() })
   return parseResponse<KnowledgeBase[]>(response, '获取知识库失败')
 }
 
 export async function uploadDocument(
-  userId: number,
   knowledgeBaseId: number,
   file: File,
 ): Promise<ApiResponse<KnowledgeDocument>> {
@@ -292,13 +289,12 @@ export async function uploadDocument(
   return parseResponse<KnowledgeDocument>(response, '上传文档失败')
 }
 
-export async function listDocuments(userId: number, knowledgeBaseId: number): Promise<ApiResponse<KnowledgeDocument[]>> {
+export async function listDocuments(knowledgeBaseId: number): Promise<ApiResponse<KnowledgeDocument[]>> {
   const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents`, { headers: userHeaders() })
   return parseResponse<KnowledgeDocument[]>(response, '获取文档列表失败')
 }
 
 export async function listWorkspaceDocuments(
-  userId: number,
   workspaceId: number,
   filters: { query?: string; status?: string; knowledgeBaseId?: number } = {},
 ): Promise<ApiResponse<WorkspaceDocument[]>> {
@@ -312,7 +308,6 @@ export async function listWorkspaceDocuments(
 }
 
 export async function refreshDocumentProcessingStatus(
-  userId: number,
   knowledgeBaseId: number,
   documentId: number,
 ): Promise<ApiResponse<KnowledgeDocument>> {
@@ -324,7 +319,6 @@ export async function refreshDocumentProcessingStatus(
 }
 
 export async function reparseDocument(
-  userId: number,
   knowledgeBaseId: number,
   documentId: number,
 ): Promise<ApiResponse<KnowledgeDocument>> {
@@ -336,7 +330,6 @@ export async function reparseDocument(
 }
 
 export async function retryDocumentProcessing(
-  userId: number,
   knowledgeBaseId: number,
   documentId: number,
 ): Promise<ApiResponse<KnowledgeDocument>> {
@@ -348,7 +341,6 @@ export async function retryDocumentProcessing(
 }
 
 export async function deleteDocument(
-  userId: number,
   knowledgeBaseId: number,
   documentId: number,
 ): Promise<void> {
@@ -364,7 +356,6 @@ export async function deleteDocument(
 }
 
 export async function searchKnowledge(
-  userId: number,
   knowledgeBaseId: number,
   query: string,
   mode?: RetrievalMode,
@@ -379,7 +370,7 @@ export async function searchKnowledge(
   return parseResponse<KnowledgeRetrievalChunk[]>(response, '检索知识库失败')
 }
 
-export async function askKnowledge(userId: number, knowledgeBaseId: number, question: string): Promise<ApiResponse<KnowledgeAnswer>> {
+export async function askKnowledge(knowledgeBaseId: number, question: string): Promise<ApiResponse<KnowledgeAnswer>> {
   const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/answer`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...userHeaders() }, body: JSON.stringify({ question }),
   })
@@ -387,7 +378,6 @@ export async function askKnowledge(userId: number, knowledgeBaseId: number, ques
 }
 
 export async function createConversation(
-  userId: number,
   knowledgeBaseId: number,
   title?: string,
 ): Promise<ApiResponse<ConversationSession>> {
@@ -406,7 +396,6 @@ export async function createConversation(
  * 并可以用 `.data.hasNext` 决定要不要显示「加载更多」。
  */
 export async function listConversations(
-  userId: number,
   knowledgeBaseId: number,
   query = '',
   page = 0,
@@ -429,7 +418,6 @@ export async function listConversations(
  * 而不是追加到后面。
  */
 export async function listConversationMessages(
-  userId: number,
   knowledgeBaseId: number,
   sessionId: number,
   page = 0,
@@ -444,7 +432,6 @@ export async function listConversationMessages(
 }
 
 export async function renameConversation(
-  userId: number,
   knowledgeBaseId: number,
   sessionId: number,
   title: string,
@@ -458,7 +445,6 @@ export async function renameConversation(
 }
 
 export async function deleteConversation(
-  userId: number,
   knowledgeBaseId: number,
   sessionId: number,
 ): Promise<void> {
@@ -474,7 +460,6 @@ export async function deleteConversation(
 }
 
 export async function askConversationAgent(
-  userId: number,
   knowledgeBaseId: number,
   sessionId: number,
   question: string,
@@ -498,7 +483,6 @@ export type ConversationStreamEvent =
   | { event: 'error'; data: { message: string } }
 
 export async function streamConversation(
-  userId: number,
   knowledgeBaseId: number,
   sessionId: number,
   question: string,

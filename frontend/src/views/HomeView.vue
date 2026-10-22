@@ -1,20 +1,14 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
-import { AUTH_CHANGED_EVENT, WORKSPACE_CHANGED_EVENT } from '@/services/crossTabSync'
 
 import { getWorkspaceOverview, type WorkspaceOverview } from '@/services/api'
+import { statusLabel } from '@/services/labels'
+import { formatSize } from '@/services/format'
+import { useWorkspaceContext } from '@/composables/useWorkspaceContext'
 
-type StoredUser = { id: number; username: string }
+const { currentUser, workspaceId, onContextChange } = useWorkspaceContext()
 
-function readStoredUser(): StoredUser | null {
-  const stored = localStorage.getItem('currentUser')
-  if (!stored) return null
-  try { return JSON.parse(stored) as StoredUser } catch { return null }
-}
-
-const currentUser = ref<StoredUser | null>(readStoredUser())
-const workspaceId = ref(localStorage.getItem('activeWorkspaceId') ?? '')
 const overview = ref<WorkspaceOverview | null>(null)
 const loading = ref(false)
 const error = ref('')
@@ -24,44 +18,23 @@ function formatDate(value: string) {
   return new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric' }).format(new Date(value))
 }
 
-function formatSize(value: number) {
-  if (value < 1024 * 1024) return `${Math.max(1, Math.ceil(value / 1024))} KB`
-  return `${(value / 1024 / 1024).toFixed(1)} MB`
-}
-
-/** 任务状态显示为中文（数据本身仍是英文枚举） */
-const STATUS_LABELS: Record<string, string> = {
-  COMPLETED: '已完成', PROCESSING: '处理中', ACCEPTED: '已受理', RETRYING: '重试中', FAILED: '失败', ACTIVE: '正常',
-}
-const statusLabel = (value: string) => STATUS_LABELS[value] ?? value
-
 const BOOK_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>'
 const CHAT_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>'
 
 async function loadOverview() {
-  currentUser.value = readStoredUser()
-  workspaceId.value = localStorage.getItem('activeWorkspaceId') ?? ''
   if (!currentUser.value || !workspaceId.value) { overview.value = null; return }
   loading.value = true
   error.value = ''
   try {
-    const response = await getWorkspaceOverview(currentUser.value.id, Number(workspaceId.value))
+    const response = await getWorkspaceOverview(Number(workspaceId.value))
     overview.value = response.data
   } catch (requestError) {
     error.value = requestError instanceof Error ? requestError.message : '概览加载失败'
   } finally { loading.value = false }
 }
 
-onMounted(() => {
-  window.addEventListener(AUTH_CHANGED_EVENT, loadOverview)
-  window.addEventListener(WORKSPACE_CHANGED_EVENT, loadOverview)
-  void loadOverview()
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener(AUTH_CHANGED_EVENT, loadOverview)
-  window.removeEventListener(WORKSPACE_CHANGED_EVENT, loadOverview)
-})
+onContextChange(() => { void loadOverview() })
+onMounted(() => { void loadOverview() })
 </script>
 
 <template>

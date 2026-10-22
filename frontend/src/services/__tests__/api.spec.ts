@@ -53,7 +53,7 @@ describe('listConversations 的分页参数', () => {
   it('默认请求第 0 页', async () => {
     const fetchMock = stubFetch({ code: 'OK', message: '', data: emptyPage })
 
-    await listConversations(1, 20)
+    await listConversations(20)
 
     const url = requestedUrl(fetchMock)
     expect(url).toContain('/api/v1/knowledge-bases/20/conversations?')
@@ -64,7 +64,7 @@ describe('listConversations 的分页参数', () => {
   it('把页号和每页条数原样带上', async () => {
     const fetchMock = stubFetch({ code: 'OK', message: '', data: emptyPage })
 
-    await listConversations(1, 20, '', 3, 50)
+    await listConversations(20, '', 3, 50)
 
     const url = requestedUrl(fetchMock)
     expect(url).toContain('page=3')
@@ -73,7 +73,7 @@ describe('listConversations 的分页参数', () => {
 
   it('搜索词要正确编码，且空串不占位', async () => {
     const withQuery = stubFetch({ code: 'OK', message: '', data: emptyPage })
-    await listConversations(1, 20, '发布 流程/规范')
+    await listConversations(20, '发布 流程/规范')
 
     // 这里**不**断言字面上的 `%20`：URLSearchParams 走的是 query string 的标准编码
     // （application/x-www-form-urlencoded），空格编成 `+`、斜杠编成 `%2F`。
@@ -86,7 +86,7 @@ describe('listConversations 的分页参数', () => {
     expect(raw).not.toContain('query=发布 流程/规范')
 
     const withoutQuery = stubFetch({ code: 'OK', message: '', data: emptyPage })
-    await listConversations(1, 20, '   ')
+    await listConversations(20, '   ')
     // 只有空白字符等于没搜，不该发一个 `query=` 的空参数出去
     expect(requestedUrl(withoutQuery)).not.toContain('query=')
   })
@@ -94,7 +94,7 @@ describe('listConversations 的分页参数', () => {
   it('带上 Bearer token', async () => {
     const fetchMock = stubFetch({ code: 'OK', message: '', data: emptyPage })
 
-    await listConversations(1, 20)
+    await listConversations(20)
 
     const init = fetchMock.mock.calls[0][1] as RequestInit
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer test-token')
@@ -110,7 +110,7 @@ describe('listConversations 的分页参数', () => {
     }
     stubFetch({ code: 'OK', message: '', data: page })
 
-    const response = await listConversations(1, 20)
+    const response = await listConversations(20)
 
     expect(response.data.items).toHaveLength(1)
     expect(response.data.items[0].title).toBe('发布流程')
@@ -125,7 +125,7 @@ describe('listConversationMessages 的分页参数', () => {
   it('页号越大越往历史深处走', async () => {
     const fetchMock = stubFetch({ code: 'OK', message: '', data: emptyPage })
 
-    await listConversationMessages(1, 20, 7, 2, 30)
+    await listConversationMessages(20, 7, 2, 30)
 
     expect(requestedUrl(fetchMock)).toContain('/conversations/7/messages?')
     expect(requestedUrl(fetchMock)).toContain('page=2')
@@ -141,6 +141,6 @@ describe('listConversationMessages 的分页参数', () => {
   it('服务端报错时抛出带后端消息的错误', async () => {
     stubFetch({ code: 'RATE_LIMIT_EXCEEDED', message: 'too many requests', data: null }, false)
 
-    await expect(listConversationMessages(1, 20, 7)).rejects.toThrow('too many requests')
+    await expect(listConversationMessages(20, 7)).rejects.toThrow('too many requests')
   })
 })

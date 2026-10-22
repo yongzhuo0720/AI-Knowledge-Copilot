@@ -1,42 +1,30 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { AUTH_CHANGED_EVENT, WORKSPACE_CHANGED_EVENT, WORKSPACES_CHANGED_EVENT } from '@/services/crossTabSync'
+import { AUTH_CHANGED_EVENT } from '@/services/crossTabSync'
 
 import {
   createKnowledgeBase,
   createWorkspace as createWorkspaceApi,
-  listKnowledgeBases,
-  listWorkspaces,
   login,
   logout,
   registerUser,
   type KnowledgeBase,
-  type LoginResponse,
-  type Workspace,
 } from '@/services/api'
+import { clearAuthState } from '@/services/auth'
+import { SPARK_ICON } from '@/services/icons'
+import { useWorkspaceContext } from '@/composables/useWorkspaceContext'
 
-type AuthUser = LoginResponse['user']
 type AuthMode = 'user' | 'admin' | 'register'
 
 const router = useRouter()
+const { currentUser, workspaces, workspaceId, knowledgeBases, loadContext, switchWorkspace, onContextChange } = useWorkspaceContext()
 
-function readStoredUser(): AuthUser | null {
-  const storedUser = localStorage.getItem('currentUser')
-  if (!storedUser) return null
-  try { return JSON.parse(storedUser) as AuthUser } catch { return null }
-}
-
-const currentUser = ref<AuthUser | null>(readStoredUser())
-const userId = ref(currentUser.value ? String(currentUser.value.id) : '')
 const loggedIn = ref(Boolean(localStorage.getItem('accessToken') && currentUser.value))
 const authMode = ref<AuthMode>('user')
 const email = ref('')
 const password = ref('')
 const username = ref('')
-const workspaceId = ref('')
-const workspaces = ref<Workspace[]>([])
-const knowledgeBases = ref<KnowledgeBase[]>([])
 const knowledgeBaseId = ref('')
 const workspaceName = ref('我的工作空间')
 const name = ref('')
@@ -45,37 +33,26 @@ const knowledgeBase = ref<KnowledgeBase | null>(null)
 const message = ref('')
 const loading = ref(false)
 
-const SPARK_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>'
-
-onMounted(() => {
-  window.addEventListener(AUTH_CHANGED_EVENT, syncAuthState)
-  window.addEventListener(WORKSPACE_CHANGED_EVENT, handleGlobalWorkspaceChange)
-  if (loggedIn.value) void restoreWorkspaceContext()
-})
-
-onBeforeUnmount(() => {
-  window.removeEventListener(AUTH_CHANGED_EVENT, syncAuthState)
-  window.removeEventListener(WORKSPACE_CHANGED_EVENT, handleGlobalWorkspaceChange)
-})
-
-function syncAuthState() {
-  currentUser.value = readStoredUser()
-  userId.value = currentUser.value ? String(currentUser.value.id) : ''
+/**
+ * 登录态 / 工作空间 / 知识库列表由 useWorkspaceContext 统一维护。
+ * 这里跟着同步「是否已登录」和「当前选中的知识库」。
+ */
+onContextChange(({ workspaceChanged }) => {
   loggedIn.value = Boolean(localStorage.getItem('accessToken') && currentUser.value)
-  if (loggedIn.value) void restoreWorkspaceContext()
-  else {
-    workspaces.value = []; knowledgeBases.value = []; workspaceId.value = ''; knowledgeBaseId.value = ''
+  if (!loggedIn.value) {
+    knowledgeBaseId.value = ''
+    knowledgeBase.value = null
+    return
+  }
+  if (workspaceChanged) {
+    knowledgeBaseId.value = ''
     knowledgeBase.value = null
   }
-}
-
-function handleGlobalWorkspaceChange(event: Event) {
-  const workspaceEvent = event as CustomEvent<{ workspaceId?: string }>
-  const nextWorkspaceId = workspaceEvent.detail?.workspaceId
-  if (!loggedIn.value || !nextWorkspaceId || nextWorkspaceId === workspaceId.value) return
-  workspaceId.value = nextWorkspaceId
-  void handleWorkspaceChange(false)
-}
+  if (!knowledgeBases.value.some((item) => item.id === knowledgeBase.value?.id)) {
+    knowledgeBaseId.value = knowledgeBases.value.length ? String(knowledgeBases.value[0].id) : ''
+    knowledgeBase.value = knowledgeBases.value[0] ?? null
+  }
+})
 
 function showError(error: unknown, fallback: string) {
   message.value = error instanceof Error ? error.message : fallback
@@ -95,7 +72,6 @@ async function submitAuth() {
     const isAdminLogin = authMode.value === 'admin'
     const response = await login(email.value, password.value, isAdminLogin)
     currentUser.value = response.data.user
-    userId.value = String(response.data.user.id)
     localStorage.setItem('accessToken', response.data.accessToken)
     localStorage.setItem('currentUser', JSON.stringify(response.data.user))
     loggedIn.value = true
@@ -115,55 +91,16 @@ async function submitAuth() {
 function switchAuthMode(mode: AuthMode) { authMode.value = mode; message.value = '' }
 
 async function signOut() {
-  // 先通知后端作废 token，再清本地状态（与 App.vue 的退出逻辑保持一致）
+  // 先通知后端作废 token，再清本地状态（顺序不能反：请求头依赖 localStorage 里的 token）
   await logout()
-  localStorage.removeItem('accessToken')
-  localStorage.removeItem('currentUser')
-  localStorage.removeItem('activeWorkspaceId')
-  currentUser.value = null; userId.value = ''; loggedIn.value = false
-  workspaces.value = []; knowledgeBases.value = []; workspaceId.value = ''; knowledgeBaseId.value = ''
-  knowledgeBase.value = null
-  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT))
-}
-
-async function restoreWorkspaceContext() {
-  if (!userId.value) return
-  loading.value = true
-  try {
-    const response = await listWorkspaces(Number(userId.value))
-    workspaces.value = response.data
-    const storedWorkspaceId = localStorage.getItem('activeWorkspaceId')
-    if (storedWorkspaceId && workspaces.value.some((item) => String(item.id) === storedWorkspaceId)) workspaceId.value = storedWorkspaceId
-    else if (!workspaceId.value && workspaces.value.length) workspaceId.value = String(workspaces.value[0].id)
-    if (workspaceId.value) localStorage.setItem('activeWorkspaceId', workspaceId.value)
-    if (workspaceId.value) await loadKnowledgeBases()
-  } catch (error) { showError(error, '恢复工作空间失败')
-  } finally { loading.value = false }
-}
-
-async function loadKnowledgeBases() {
-  if (!workspaceId.value) return
-  const response = await listKnowledgeBases(Number(userId.value), Number(workspaceId.value))
-  knowledgeBases.value = response.data
-  if (!knowledgeBases.value.some((item) => item.id === knowledgeBase.value?.id)) {
-    knowledgeBaseId.value = knowledgeBases.value.length ? String(knowledgeBases.value[0].id) : ''
-    if (knowledgeBases.value.length) await selectKnowledgeBase(knowledgeBases.value[0])
-    else knowledgeBase.value = null
-  }
-}
-
-async function handleWorkspaceChange(notifyShell = true) {
-  if (workspaceId.value) {
-    localStorage.setItem('activeWorkspaceId', workspaceId.value)
-    if (notifyShell) window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT, { detail: { workspaceId: workspaceId.value } }))
-  }
-  knowledgeBase.value = null
+  clearAuthState()
+  loggedIn.value = false
   knowledgeBaseId.value = ''
-  await loadKnowledgeBases()
+  knowledgeBase.value = null
 }
 
-function handleWorkspaceSelect() {
-  void handleWorkspaceChange()
+function handleWorkspaceSelect(id: string) {
+  void switchWorkspace(id)
 }
 
 async function selectKnowledgeBase(item: KnowledgeBase) {
@@ -177,34 +114,38 @@ async function handleKnowledgeBaseChange() {
 }
 
 async function createWorkspace() {
-  if (!userId.value || !workspaceName.value.trim()) return
+  const userId = currentUser.value?.id
+  if (!userId || !workspaceName.value.trim()) return
   loading.value = true; message.value = ''
   try {
-    const response = await createWorkspaceApi(Number(userId.value), workspaceName.value.trim())
-    workspaceId.value = String(response.data.id)
-    localStorage.setItem('activeWorkspaceId', workspaceId.value)
-    workspaces.value = [...workspaces.value, response.data]
-    knowledgeBases.value = []
-    knowledgeBase.value = null
-    knowledgeBaseId.value = ''
+    const response = await createWorkspaceApi(userId, workspaceName.value.trim())
+    // 切到新空间：switchWorkspace 会落盘并经 loadContext 刷新共享的工作空间列表（侧栏跟着更新）
+    await switchWorkspace(String(response.data.id))
     message.value = `工作空间已创建：${response.data.name}（ID ${response.data.id}）`
-    window.dispatchEvent(new Event(WORKSPACES_CHANGED_EVENT))
-    await handleWorkspaceChange(false)
   } catch (error) { showError(error, '创建工作空间失败')
   } finally { loading.value = false }
 }
 
 async function create() {
-  if (!workspaceId.value || !name.value.trim()) return
+  const userId = currentUser.value?.id
+  if (!workspaceId.value || !userId || !name.value.trim()) return
   loading.value = true; message.value = ''
   try {
-    const response = await createKnowledgeBase(Number(userId.value), Number(workspaceId.value), name.value, description.value)
+    const response = await createKnowledgeBase(Number(workspaceId.value), name.value, description.value)
     knowledgeBase.value = response.data; knowledgeBaseId.value = String(response.data.id)
     knowledgeBases.value = [...knowledgeBases.value, response.data]
     message.value = '知识库创建成功，现在可以上传文档。'
   } catch (error) { showError(error, '创建知识库失败')
   } finally { loading.value = false }
 }
+
+onMounted(async () => {
+  if (!loggedIn.value) return
+  loading.value = true
+  try { await loadContext() }
+  catch (error) { showError(error, '恢复工作空间失败') }
+  finally { loading.value = false }
+})
 </script>
 
 <style scoped>
@@ -244,7 +185,7 @@ async function create() {
     </section>
 
     <section v-else class="workspace-grid">
-      <aside class="setup-column"><details class="panel setup-panel"><summary class="setup-summary"><span><p class="eyebrow">01 · 准备</p><h2>准备工作空间</h2></span><span class="setup-state">{{ knowledgeBase ? '已就绪' : '待完成' }}</span></summary><div class="setup-body"><p class="section-copy">选择已有空间，或创建一个新的工作空间。</p><label>当前工作空间<select v-model="workspaceId" :disabled="loading || !workspaces.length" @change="handleWorkspaceSelect"><option value="" disabled>{{ workspaces.length ? '请选择工作空间' : '暂时没有工作空间' }}</option><option v-for="workspace in workspaces" :key="workspace.id" :value="String(workspace.id)">{{ workspace.name }}</option></select></label></div></details>
+      <aside class="setup-column"><details class="panel setup-panel"><summary class="setup-summary"><span><p class="eyebrow">01 · 准备</p><h2>准备工作空间</h2></span><span class="setup-state">{{ knowledgeBase ? '已就绪' : '待完成' }}</span></summary><div class="setup-body"><p class="section-copy">选择已有空间，或创建一个新的工作空间。</p><label>当前工作空间<select :value="workspaceId" :disabled="loading || !workspaces.length" @change="handleWorkspaceSelect(($event.target as HTMLSelectElement).value)"><option value="" disabled>{{ workspaces.length ? '请选择工作空间' : '暂时没有工作空间' }}</option><option v-for="workspace in workspaces" :key="workspace.id" :value="String(workspace.id)">{{ workspace.name }}</option></select></label></div></details>
       <details class="panel setup-panel"><summary class="setup-summary"><span><p class="eyebrow">02 · 创建</p><h2>创建知识库</h2></span><span class="setup-state">新建</span></summary><div class="setup-body"><p class="section-copy">为资料集合设置一个清晰的名字和描述。</p><form @submit.prevent="create"><label>知识库名称<input v-model="name" maxlength="128" required placeholder="例如：研发规范" /></label><label>描述<textarea v-model="description" maxlength="500" placeholder="可选：这套资料主要解决什么问题？" /></label><button class="primary-button wide-button" :disabled="loading || !workspaceId || !name.trim()" type="submit">{{ loading ? '处理中…' : '创建知识库' }}</button></form></div></details>
         <details class="panel setup-panel"><summary class="setup-summary"><span><p class="eyebrow">03 · 新空间</p><h2>新建工作空间</h2></span><span class="setup-state">可选</span></summary><div class="setup-body"><p class="section-copy">工作空间是知识库、文档和会话的协作边界。</p><div class="inline-create"><label>新空间名称<input v-model="workspaceName" maxlength="128" placeholder="例如：产品研发部" /></label><button class="secondary-button" :disabled="loading || !workspaceName.trim()" type="button" @click="createWorkspace">一键创建</button></div></div></details>
       <p v-if="message" class="message side-message" :class="{ 'message-error': message.includes('失败') || message.includes('错误') }">{{ message }}<button class="message-clear" type="button" title="关闭提示" @click="message = ''">×</button></p></aside>

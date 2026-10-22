@@ -45,7 +45,7 @@ beforeEach(() => {
   localStorage.setItem('currentUser', JSON.stringify({ id: 1, username: '测试', email: 'test@example.com', status: 'ACTIVE' }))
   localStorage.setItem('activeWorkspaceId', '1')
   vi.mocked(api.listWorkspaces).mockResolvedValue(response(workspaces))
-  vi.mocked(api.listKnowledgeBases).mockImplementation(async (_userId, workspaceId) => response([
+  vi.mocked(api.listKnowledgeBases).mockImplementation(async (workspaceId) => response([
     { id: workspaceId * 10, workspaceId, name: `${workspaceId}号知识库`, description: '', status: 'ACTIVE' },
   ]))
   vi.mocked(api.listConversations).mockResolvedValue(page(sessions))
@@ -76,8 +76,8 @@ describe('工作空间切换', () => {
     await flushPromises()
 
     expect(wrapper.find('select').element.value).toBe('2')
-    if (component === SettingsView) expect(api.listWorkspaceMembers).toHaveBeenLastCalledWith(1, 2)
-    else expect(api.listKnowledgeBases).toHaveBeenLastCalledWith(1, 2)
+    if (component === SettingsView) expect(api.listWorkspaceMembers).toHaveBeenLastCalledWith(2)
+    else expect(api.listKnowledgeBases).toHaveBeenLastCalledWith(2)
   })
 
   it.each([
@@ -85,19 +85,16 @@ describe('工作空间切换', () => {
     ['Retrieval', RetrievalView],
     ['Settings', SettingsView],
     ['Chat', ChatView],
-  ] as const)('%s 的局部选择通知全局侧栏', async (_name, component) => {
+  ] as const)('%s 的局部选择写入全局上下文', async (_name, component) => {
     wrapper = mount(component)
     await flushPromises()
-    const listener = vi.fn()
-    window.addEventListener('aicopilot-workspace-changed', listener)
-    try {
-      await wrapper.find('select').setValue('2')
-      await flushPromises()
-      expect(localStorage.getItem('activeWorkspaceId')).toBe('2')
-      expect(listener).toHaveBeenCalledTimes(1)
-    } finally {
-      window.removeEventListener('aicopilot-workspace-changed', listener)
-    }
+    await wrapper.find('select').setValue('2')
+    await flushPromises()
+    // 视图局部切换不再派发自定义事件：所有视图与侧栏读的是同一份共享上下文，
+    // 「通知」退化成「直接写状态」。这里验证落盘 + 上下文按新空间重新加载。
+    expect(localStorage.getItem('activeWorkspaceId')).toBe('2')
+    if (component === SettingsView) expect(api.listWorkspaceMembers).toHaveBeenLastCalledWith(2)
+    else expect(api.listKnowledgeBases).toHaveBeenLastCalledWith(2)
   })
 })
 
@@ -117,7 +114,7 @@ it('检索调试保留所选模式的结果，并把 Top-K 发给后端', async 
   await wrapper.find('button.retrieval-run').trigger('click')
   await flushPromises()
 
-  expect(api.searchKnowledge).toHaveBeenLastCalledWith(1, 10, '发布规则', 'keyword', 10)
+  expect(api.searchKnowledge).toHaveBeenLastCalledWith(10, '发布规则', 'keyword', 10)
   expect(wrapper.find('.retrieval-chunk-list').text()).toContain('关键词匹配片段')
   expect(wrapper.find('.retrieval-chunk-list').text()).not.toContain('默认回答来源')
 })
@@ -155,7 +152,7 @@ it('知识库页退出登录先撤销后端 Token', async () => {
 it('切换会话后忽略上一条生成流的迟到消息', async () => {
   let dispatch: ((event: api.ConversationStreamEvent) => void) | undefined
   let finish: (() => void) | undefined
-  vi.mocked(api.streamConversation).mockImplementation(async (_user, _base, _session, _question, _signal, onEvent) => {
+  vi.mocked(api.streamConversation).mockImplementation(async (_base, _session, _question, _signal, onEvent) => {
     dispatch = onEvent
     await new Promise<void>((resolve) => { finish = resolve })
   })
@@ -170,7 +167,7 @@ it('切换会话后忽略上一条生成流的迟到消息', async () => {
   await flushPromises()
 
   expect(wrapper.find('.chat-messages').text()).not.toContain('旧会话迟到内容')
-  expect(vi.mocked(api.streamConversation).mock.calls[0]![4].aborted).toBe(true)
+  expect(vi.mocked(api.streamConversation).mock.calls[0]![3].aborted).toBe(true)
   finish?.()
   await flushPromises()
 })

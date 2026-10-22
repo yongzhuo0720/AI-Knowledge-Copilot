@@ -1,25 +1,18 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
-import { AUTH_CHANGED_EVENT, WORKSPACE_CHANGED_EVENT, WORKSPACES_CHANGED_EVENT } from '@/services/crossTabSync'
+import { AUTH_CHANGED_EVENT } from '@/services/crossTabSync'
 
-import { listWorkspaces, logout, type Workspace } from '@/services/api'
-
-type StoredUser = { id: number; username: string; email: string; status: string; isAdmin?: boolean }
-
-function readStoredUser(): StoredUser | null {
-  const stored = localStorage.getItem('currentUser')
-  if (!stored) return null
-  try { return JSON.parse(stored) as StoredUser } catch { return null }
-}
+import { logout } from '@/services/api'
+import { clearAuthState } from '@/services/auth'
+import { featherIcon } from '@/services/icons'
+import { useWorkspaceContext } from '@/composables/useWorkspaceContext'
 
 const route = useRoute()
 const router = useRouter()
-const currentUser = ref<StoredUser | null>(readStoredUser())
+const { currentUser, workspaces, workspaceId: activeWorkspaceId, loading: workspaceLoading, loadContext, switchWorkspace } = useWorkspaceContext()
+
 const accessToken = ref(localStorage.getItem('accessToken'))
-const workspaces = ref<Workspace[]>([])
-const activeWorkspaceId = ref(localStorage.getItem('activeWorkspaceId') ?? '')
-const workspaceLoading = ref(false)
 const workspaceError = ref('')
 
 const isAuthenticated = computed(() => Boolean(accessToken.value && currentUser.value))
@@ -39,11 +32,8 @@ const primaryNavigation = [
 /**
  * 图标统一用 feather 风格（stroke，24x24），不用 emoji。
  * 以字符串返回、template 里 v-html 渲染 —— 内容全部来自本文件的常量，无注入风险。
+ * 工厂函数在 services/icons.ts，这里只保留导航专属的图标映射。
  */
-function featherIcon(paths: string) {
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`
-}
-
 const NAV_ICONS: Record<string, string> = {
   '总览': featherIcon('<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/>'),
   '知识库': featherIcon('<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>'),
@@ -57,76 +47,33 @@ const BRAND_ICON = featherIcon('<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="
 
 const navIcon = (label: string) => NAV_ICONS[label] ?? NAV_ICONS['总览']
 
-async function loadWorkspaces() {
-  if (!currentUser.value) return
-  workspaceLoading.value = true
-  workspaceError.value = ''
-  try {
-    const response = await listWorkspaces(currentUser.value.id)
-    workspaces.value = response.data
-    const storedWorkspaceExists = workspaces.value.some((workspace) => String(workspace.id) === activeWorkspaceId.value)
-    if (!storedWorkspaceExists) activeWorkspaceId.value = workspaces.value.length ? String(workspaces.value[0].id) : ''
-    if (activeWorkspaceId.value) localStorage.setItem('activeWorkspaceId', activeWorkspaceId.value)
-  } catch (error) {
-    workspaceError.value = error instanceof Error ? error.message : '工作空间加载失败'
-  } finally {
-    workspaceLoading.value = false
-  }
-}
-
+/**
+ * 登录态变化时只需要刷新 App 自己的 token 视图；currentUser / workspaces
+ * 由 useWorkspaceContext 在同一个事件里同步。未登录则把用户带回登录页。
+ */
 function syncAuthState() {
   accessToken.value = localStorage.getItem('accessToken')
-  currentUser.value = readStoredUser()
-  if (isAuthenticated.value) void loadWorkspaces()
-  else {
-    workspaces.value = []
-    if (route.path !== '/knowledge') void router.replace('/knowledge')
-  }
-}
-
-function selectWorkspace() {
-  if (!activeWorkspaceId.value) return
-  localStorage.setItem('activeWorkspaceId', activeWorkspaceId.value)
-  window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT, { detail: { workspaceId: activeWorkspaceId.value } }))
-}
-
-/**
- * 跨标签页切换工作空间：把 localStorage 里的新值同步进 `ref`。
- *
- * 之所以**必须幂等**：本标签页自己调 `selectWorkspace` 时也会派发同一个事件，
- * 那时 `ref` 已经等于 localStorage，这里直接返回，不会多打一次接口。
- * （另一个标签页改的则一定不相等，才会真的走同步。）
- */
-function syncWorkspaceFromStorage() {
-  const stored = localStorage.getItem('activeWorkspaceId') ?? ''
-  if (stored === activeWorkspaceId.value) return
-  activeWorkspaceId.value = stored
-  void loadWorkspaces()
+  if (!isAuthenticated.value && route.path !== '/knowledge') void router.replace('/knowledge')
 }
 
 async function signOut() {
-  // 先通知后端作废 token，再清本地状态（顺序不能反：请求头依赖 localStorage 里的 token）
+  // 先通知后端作废 token，再清本地状态（顺序不能反：请求头依赖 localStorage 里的 token）。
+  // clearAuthState 会广播 AUTH_CHANGED_EVENT：上下文模块重置共享状态，这里同步 token 并跳转。
   await logout()
-  localStorage.removeItem('accessToken')
-  localStorage.removeItem('currentUser')
-  localStorage.removeItem('activeWorkspaceId')
-  syncAuthState()
-  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT))
-  void router.push('/knowledge')
+  clearAuthState()
 }
 
 onMounted(() => {
   window.addEventListener(AUTH_CHANGED_EVENT, syncAuthState)
-  window.addEventListener(WORKSPACES_CHANGED_EVENT, loadWorkspaces)
-  // 跨标签页的工作空间切换经由 crossTabSync 翻译成这个事件（见 services/crossTabSync.ts）
-  window.addEventListener(WORKSPACE_CHANGED_EVENT, syncWorkspaceFromStorage)
-  if (isAuthenticated.value) void loadWorkspaces()
+  if (isAuthenticated.value) {
+    void loadContext().catch((error) => {
+      workspaceError.value = error instanceof Error ? error.message : '工作空间加载失败'
+    })
+  }
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener(AUTH_CHANGED_EVENT, syncAuthState)
-  window.removeEventListener(WORKSPACES_CHANGED_EVENT, loadWorkspaces)
-  window.removeEventListener(WORKSPACE_CHANGED_EVENT, syncWorkspaceFromStorage)
 })
 </script>
 
@@ -140,7 +87,7 @@ onBeforeUnmount(() => {
 
       <section class="workspace-picker">
         <span class="sidebar-label">当前工作空间</span>
-        <select v-model="activeWorkspaceId" :disabled="workspaceLoading || !workspaces.length" aria-label="选择工作空间" @change="selectWorkspace">
+        <select :value="activeWorkspaceId" :disabled="workspaceLoading || !workspaces.length" aria-label="选择工作空间" @change="switchWorkspace(($event.target as HTMLSelectElement).value)">
           <option value="" disabled>{{ workspaceLoading ? '加载中…' : workspaces.length ? '选择工作空间' : '暂无工作空间' }}</option>
           <option v-for="workspace in workspaces" :key="workspace.id" :value="String(workspace.id)">{{ workspace.name }}</option>
         </select>

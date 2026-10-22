@@ -1,25 +1,23 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { AUTH_CHANGED_EVENT, WORKSPACE_CHANGED_EVENT } from '@/services/crossTabSync'
 
 import {
   createConversation,
   deleteConversation,
   listConversationMessages,
   listConversations,
-  listKnowledgeBases,
-  listWorkspaces,
   renameConversation,
   streamConversation,
   type ConversationMessage,
   type ConversationSession,
-  type KnowledgeBase,
   type KnowledgeRetrievalChunk,
-  type Workspace,
 } from '@/services/api'
 import { looksLikeMarkdown, renderMarkdown } from '@/services/markdown'
+import { retrieverLabel } from '@/services/labels'
+import { SPARK_ICON } from '@/services/icons'
+import { useWorkspaceContext } from '@/composables/useWorkspaceContext'
 
-type StoredUser = { id: number; username: string }
+const { currentUser, workspaces, workspaceId, knowledgeBases, loadContext, switchWorkspace, onContextChange } = useWorkspaceContext()
 
 /**
  * 每页条数。会话列表和消息流取不同的值，是因为两者的「一屏」大小不一样：
@@ -28,19 +26,9 @@ type StoredUser = { id: number; username: string }
 const SESSION_PAGE_SIZE = 20
 const MESSAGE_PAGE_SIZE = 30
 
-function readStoredUser(): StoredUser | null {
-  const stored = localStorage.getItem('currentUser')
-  if (!stored) return null
-  try { return JSON.parse(stored) as StoredUser } catch { return null }
-}
-
-const currentUser = ref<StoredUser | null>(readStoredUser())
-const workspaces = ref<Workspace[]>([])
-const knowledgeBases = ref<KnowledgeBase[]>([])
 const sessions = ref<ConversationSession[]>([])
 const messages = ref<ConversationMessage[]>([])
 const sources = ref<KnowledgeRetrievalChunk[]>([])
-const workspaceId = ref(localStorage.getItem('activeWorkspaceId') ?? '')
 const knowledgeBaseId = ref('')
 const sessionId = ref<number | null>(null)
 const sessionSearch = ref('')
@@ -68,61 +56,37 @@ let streamController: AbortController | null = null
 let sessionListRequestId = 0
 let messageRequestId = 0
 
-const SPARK_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>'
-
 const activeKnowledgeBase = () => knowledgeBases.value.find((item) => item.id === Number(knowledgeBaseId.value))
 
-/** 引用来源标注它被哪一路召回器命中：向量 / 关键词 / 双路命中 */
-const RETRIEVER_LABELS: Record<string, string> = { vector: '向量', keyword: '关键词', hybrid: '双路命中' }
-const retrieverLabel = (value?: string | null) => RETRIEVER_LABELS[value ?? 'vector'] ?? '向量'
-
-async function loadContext() {
-  currentUser.value = readStoredUser()
-  const nextWorkspaceId = localStorage.getItem('activeWorkspaceId') ?? ''
-  if (nextWorkspaceId !== workspaceId.value) {
+/** 上下文（登录态 / 工作空间 / 知识库）由 useWorkspaceContext 维护；这里跟着重置并刷新会话。 */
+onContextChange(({ workspaceChanged }) => {
+  if (workspaceChanged) {
     abortStream()
+    knowledgeBaseId.value = ''
     resetConversationState()
   }
-  workspaceId.value = nextWorkspaceId
   if (!currentUser.value) {
-    workspaces.value = []
-    knowledgeBases.value = []
     knowledgeBaseId.value = ''
     resetConversationState()
     return
   }
-  loading.value = true
-  try {
-    const workspaceResponse = await listWorkspaces(currentUser.value.id)
-    workspaces.value = workspaceResponse.data
-    if (!workspaceId.value || !workspaces.value.some((item) => String(item.id) === workspaceId.value)) workspaceId.value = workspaces.value.length ? String(workspaces.value[0].id) : ''
-    if (workspaceId.value) await loadKnowledgeBases()
-  } catch (error) { message.value = error instanceof Error ? error.message : 'Chat 加载失败' }
-  finally { loading.value = false }
-}
-
-async function loadKnowledgeBases() {
-  if (!currentUser.value || !workspaceId.value) { knowledgeBases.value = []; return }
-  try {
-    const response = await listKnowledgeBases(currentUser.value.id, Number(workspaceId.value))
-    knowledgeBases.value = response.data
-    if (!knowledgeBases.value.some((item) => String(item.id) === knowledgeBaseId.value)) knowledgeBaseId.value = knowledgeBases.value.length ? String(knowledgeBases.value[0].id) : ''
-    await loadSessions()
-  } catch (error) {
-    message.value = error instanceof Error ? error.message : '加载知识库失败'
+  if (!workspaceId.value) return
+  if (!knowledgeBases.value.some((item) => String(item.id) === knowledgeBaseId.value)) {
+    knowledgeBaseId.value = knowledgeBases.value.length ? String(knowledgeBases.value[0].id) : ''
   }
-}
+  void loadSessions().catch((error) => { message.value = error instanceof Error ? error.message : 'Chat 加载失败' })
+})
 
 async function loadSessions(createIfEmpty = true) {
   const requestId = ++sessionListRequestId
-  if (!currentUser.value || !knowledgeBaseId.value) {
+  if (!knowledgeBaseId.value) {
     resetConversationState()
     return
   }
   // 换知识库 / 改搜索词都相当于「重新开一页」，页码必须归零 ——
   // 否则会把上一次的第 3 页条件带进新列表，直接翻出一片空白。
   sessionPage.value = 0
-  const response = await listConversations(currentUser.value.id, Number(knowledgeBaseId.value), sessionSearch.value, 0, SESSION_PAGE_SIZE)
+  const response = await listConversations(Number(knowledgeBaseId.value), sessionSearch.value, 0, SESSION_PAGE_SIZE)
   // 请求期间用户又切了知识库或改了搜索词：这份响应属于上一屏，直接丢弃。
   if (requestId !== sessionListRequestId) return
   sessions.value = response.data.items
@@ -160,13 +124,13 @@ function abortStream() {
 }
 
 async function loadMoreSessions() {
-  if (!currentUser.value || !knowledgeBaseId.value || !hasMoreSessions.value || loadingMoreSessions.value) return
+  if (!knowledgeBaseId.value || !hasMoreSessions.value || loadingMoreSessions.value) return
   loadingMoreSessions.value = true
   const requestId = sessionListRequestId
   try {
     const nextPage = sessionPage.value + 1
     const response = await listConversations(
-      currentUser.value.id, Number(knowledgeBaseId.value), sessionSearch.value, nextPage, SESSION_PAGE_SIZE,
+      Number(knowledgeBaseId.value), sessionSearch.value, nextPage, SESSION_PAGE_SIZE,
     )
     // 翻页期间换了知识库 / 搜索词：这一页属于上一份列表，不能拼进新列表。
     if (requestId !== sessionListRequestId) return
@@ -188,17 +152,6 @@ async function searchSessions() {
   await loadSessions(false)
 }
 
-async function changeWorkspace() {
-  if (!workspaceId.value) return
-  abortStream()
-  localStorage.setItem('activeWorkspaceId', workspaceId.value)
-  // 局部切换必须通知全局侧栏（App.vue 与跨标签同步都监听这个事件）
-  window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT, { detail: { workspaceId: workspaceId.value } }))
-  knowledgeBaseId.value = ''
-  resetConversationState()
-  await loadKnowledgeBases()
-}
-
 async function selectKnowledgeBase() {
   abortStream()
   message.value = ''
@@ -211,7 +164,7 @@ async function selectKnowledgeBase() {
 }
 
 async function selectSession(session: ConversationSession) {
-  if (!currentUser.value || !knowledgeBaseId.value) return
+  if (!knowledgeBaseId.value) return
   // 切换会话前停掉上一个会话可能还在进行的生成流；
   // send() 的 fromSessionId 守卫负责丢弃 abort 之后仍迟到的缓冲事件。
   abortStream()
@@ -223,7 +176,7 @@ async function selectSession(session: ConversationSession) {
   const requestId = ++messageRequestId
   try {
     const response = await listConversationMessages(
-      currentUser.value.id, Number(knowledgeBaseId.value), session.id, 0, MESSAGE_PAGE_SIZE,
+      Number(knowledgeBaseId.value), session.id, 0, MESSAGE_PAGE_SIZE,
     )
     // 连续点两个会话时先发的请求可能后返回；序号或选中会话对不上就说明这份响应已过期。
     if (requestId !== messageRequestId || sessionId.value !== session.id) return
@@ -241,7 +194,7 @@ async function selectSession(session: ConversationSession) {
 }
 
 async function loadEarlierMessages() {
-  if (!currentUser.value || !knowledgeBaseId.value || sessionId.value === null
+  if (!knowledgeBaseId.value || sessionId.value === null
     || !hasMoreMessages.value || loadingEarlierMessages.value) return
   loadingEarlierMessages.value = true
   const requestId = messageRequestId
@@ -249,7 +202,7 @@ async function loadEarlierMessages() {
   try {
     const nextPage = messagePage.value + 1
     const response = await listConversationMessages(
-      currentUser.value.id, Number(knowledgeBaseId.value), sessionId.value, nextPage, MESSAGE_PAGE_SIZE,
+      Number(knowledgeBaseId.value), sessionId.value, nextPage, MESSAGE_PAGE_SIZE,
     )
     // 加载期间切了会话：这一页是上一个会话的历史，拼进来会串台。
     if (requestId !== messageRequestId || sessionId.value !== forSessionId) return
@@ -268,10 +221,10 @@ async function loadEarlierMessages() {
 
 async function newSession() {
   // 连点「新建」会创建出多个空会话，用一个在途标记挡住第二次。
-  if (!currentUser.value || !knowledgeBaseId.value || creatingSession.value) return
+  if (!knowledgeBaseId.value || creatingSession.value) return
   creatingSession.value = true
   try {
-    const response = await createConversation(currentUser.value.id, Number(knowledgeBaseId.value))
+    const response = await createConversation(Number(knowledgeBaseId.value))
     sessions.value = [response.data, ...sessions.value]
     await selectSession(response.data)
   } catch (error) {
@@ -292,11 +245,10 @@ function cancelRename() {
 }
 
 async function saveRename(session: ConversationSession) {
-  if (!currentUser.value || !knowledgeBaseId.value || !editingTitle.value.trim()) return
+  if (!knowledgeBaseId.value || !editingTitle.value.trim()) return
   sessionActionLoading.value = true
   try {
     const response = await renameConversation(
-      currentUser.value.id,
       Number(knowledgeBaseId.value),
       session.id,
       editingTitle.value.trim(),
@@ -311,10 +263,10 @@ async function saveRename(session: ConversationSession) {
 }
 
 async function removeSession(session: ConversationSession) {
-  if (!currentUser.value || !knowledgeBaseId.value || !window.confirm(`确定删除“${session.title}”吗？`)) return
+  if (!knowledgeBaseId.value || !window.confirm(`确定删除“${session.title}”吗？`)) return
   sessionActionLoading.value = true
   try {
-    await deleteConversation(currentUser.value.id, Number(knowledgeBaseId.value), session.id)
+    await deleteConversation(Number(knowledgeBaseId.value), session.id)
     sessions.value = sessions.value.filter((item) => item.id !== session.id)
     if (session.id === sessionId.value) {
       const nextSession = sessions.value[0]
@@ -330,7 +282,7 @@ async function removeSession(session: ConversationSession) {
 }
 
 async function send() {
-  if (!currentUser.value || !knowledgeBaseId.value || !sessionId.value || !question.value.trim() || streaming.value) return
+  if (!knowledgeBaseId.value || !sessionId.value || !question.value.trim() || streaming.value) return
   const currentQuestion = question.value.trim()
   // 记住这次流是从哪个会话 / 知识库发出的：中途切走之后，迟到的 delta/sources/complete
   // 都属于上一个上下文，必须丢弃，否则别的会话的回答会混进当前消息流。
@@ -345,7 +297,7 @@ async function send() {
   streamingText.value = ''
   streaming.value = true
   try {
-    await streamConversation(currentUser.value.id, fromKnowledgeBaseId, fromSessionId, currentQuestion, controller.signal, (event) => {
+    await streamConversation(fromKnowledgeBaseId, fromSessionId, currentQuestion, controller.signal, (event) => {
       if (streamController !== controller || sessionId.value !== fromSessionId) return
       if (event.event === 'user') messages.value = [...messages.value, event.data]
       if (event.event === 'delta') streamingText.value += event.data.content
@@ -383,11 +335,11 @@ async function send() {
  * 对「刚发完一条消息」来说这些都太重，还会把用户翻出来的历史列表收缩回一页。
  */
 async function refreshSessionListAfterSend() {
-  if (!currentUser.value || !knowledgeBaseId.value) return
+  if (!knowledgeBaseId.value) return
   const requestId = sessionListRequestId
   try {
     const response = await listConversations(
-      currentUser.value.id, Number(knowledgeBaseId.value), sessionSearch.value, 0, SESSION_PAGE_SIZE,
+      Number(knowledgeBaseId.value), sessionSearch.value, 0, SESSION_PAGE_SIZE,
     )
     if (requestId !== sessionListRequestId) return
     const firstPageIds = new Set(response.data.items.map((item) => item.id))
@@ -439,24 +391,23 @@ function handleComposerKeydown(event: KeyboardEvent) {
   void send()
 }
 
-onMounted(() => {
-  window.addEventListener(AUTH_CHANGED_EVENT, loadContext)
-  window.addEventListener(WORKSPACE_CHANGED_EVENT, loadContext)
-  void loadContext()
+onMounted(async () => {
+  loading.value = true
+  try { await loadContext() }
+  catch (error) { message.value = error instanceof Error ? error.message : 'Chat 加载失败' }
+  finally { loading.value = false }
 })
 
 onBeforeUnmount(() => {
   abortStream()
   sessionListRequestId += 1
   messageRequestId += 1
-  window.removeEventListener(AUTH_CHANGED_EVENT, loadContext)
-  window.removeEventListener(WORKSPACE_CHANGED_EVENT, loadContext)
 })
 </script>
 
 <template>
   <main class="chat-shell">
-    <header class="chat-header"><div><p class="eyebrow">AI 会话</p><h1>和你的知识库对话</h1><p>回答实时生成，并保留每个来源片段。</p></div><div class="chat-context"><label>工作空间<select v-model="workspaceId" @change="changeWorkspace"><option v-for="workspace in workspaces" :key="workspace.id" :value="String(workspace.id)">{{ workspace.name }}</option></select></label><label>知识库<select v-model="knowledgeBaseId" :disabled="!knowledgeBases.length" @change="selectKnowledgeBase"><option v-for="item in knowledgeBases" :key="item.id" :value="String(item.id)">{{ item.name }}</option></select></label></div></header>
+    <header class="chat-header"><div><p class="eyebrow">AI 会话</p><h1>和你的知识库对话</h1><p>回答实时生成，并保留每个来源片段。</p></div><div class="chat-context"><label>工作空间<select :value="workspaceId" @change="switchWorkspace(($event.target as HTMLSelectElement).value)"><option v-for="workspace in workspaces" :key="workspace.id" :value="String(workspace.id)">{{ workspace.name }}</option></select></label><label>知识库<select v-model="knowledgeBaseId" :disabled="!knowledgeBases.length" @change="selectKnowledgeBase"><option v-for="item in knowledgeBases" :key="item.id" :value="String(item.id)">{{ item.name }}</option></select></label></div></header>
     <section v-if="!activeKnowledgeBase()" class="chat-empty panel"><strong>先选择一个知识库</strong><span>创建知识库并上传文档后，AI 会话才能基于企业资料回答。</span></section>
     <section v-else class="chat-layout">
       <aside class="chat-sessions panel"><div class="chat-panel-heading"><div><p class="eyebrow">会话列表</p><h2>会话</h2></div><button class="secondary-button" :disabled="streaming || sessionActionLoading || creatingSession" type="button" @click="newSession">新建</button></div><form class="chat-session-search" @submit.prevent="searchSessions"><input v-model="sessionSearch" maxlength="100" placeholder="搜索标题或消息" aria-label="搜索会话" /><button class="text-button" type="submit">搜索</button></form><div v-for="session in sessions" :key="session.id" class="chat-session-row"><button v-if="editingSessionId !== session.id" class="chat-session-item" :class="{ active: session.id === sessionId }" type="button" @click="selectSession(session)"><strong>{{ session.title }}</strong><small>{{ new Date(session.updatedAt).toLocaleDateString('zh-CN') }}</small></button><form v-else class="chat-session-edit" @submit.prevent="saveRename(session)"><input v-model="editingTitle" maxlength="200" aria-label="会话名称" /><button class="text-button" :disabled="sessionActionLoading" type="submit">保存</button><button class="text-button" :disabled="sessionActionLoading" type="button" @click="cancelRename">取消</button></form><div v-if="editingSessionId !== session.id" class="chat-session-actions"><button class="text-button" :disabled="streaming || sessionActionLoading" type="button" @click="startRename(session)">重命名</button><button class="text-button danger" :disabled="streaming || sessionActionLoading" type="button" @click="removeSession(session)">删除</button></div></div><button v-if="hasMoreSessions" class="text-button chat-load-more" :disabled="loadingMoreSessions" type="button" @click="loadMoreSessions">{{ loadingMoreSessions ? '加载中…' : '加载更多会话' }}</button></aside>
