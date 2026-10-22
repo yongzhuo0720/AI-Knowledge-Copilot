@@ -35,6 +35,7 @@ export const WORKSPACE_STORAGE_KEY = 'activeWorkspaceId'
 
 export const AUTH_CHANGED_EVENT = 'aicopilot-auth-changed'
 export const WORKSPACE_CHANGED_EVENT = 'aicopilot-workspace-changed'
+export const WORKSPACES_CHANGED_EVENT = 'aicopilot-workspaces-changed'
 
 /**
  * 把跨标签页的 `storage` 事件转成本项目的自定义事件。

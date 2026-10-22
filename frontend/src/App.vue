@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
+import { AUTH_CHANGED_EVENT, WORKSPACE_CHANGED_EVENT, WORKSPACES_CHANGED_EVENT } from '@/services/crossTabSync'
 
 import { listWorkspaces, logout, type Workspace } from '@/services/api'
 
@@ -88,7 +89,7 @@ function syncAuthState() {
 function selectWorkspace() {
   if (!activeWorkspaceId.value) return
   localStorage.setItem('activeWorkspaceId', activeWorkspaceId.value)
-  window.dispatchEvent(new CustomEvent('aicopilot-workspace-changed', { detail: { workspaceId: activeWorkspaceId.value } }))
+  window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT, { detail: { workspaceId: activeWorkspaceId.value } }))
 }
 
 /**
@@ -112,22 +113,22 @@ async function signOut() {
   localStorage.removeItem('currentUser')
   localStorage.removeItem('activeWorkspaceId')
   syncAuthState()
-  window.dispatchEvent(new Event('aicopilot-auth-changed'))
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT))
   void router.push('/knowledge')
 }
 
 onMounted(() => {
-  window.addEventListener('aicopilot-auth-changed', syncAuthState)
-  window.addEventListener('aicopilot-workspaces-changed', loadWorkspaces)
+  window.addEventListener(AUTH_CHANGED_EVENT, syncAuthState)
+  window.addEventListener(WORKSPACES_CHANGED_EVENT, loadWorkspaces)
   // 跨标签页的工作空间切换经由 crossTabSync 翻译成这个事件（见 services/crossTabSync.ts）
-  window.addEventListener('aicopilot-workspace-changed', syncWorkspaceFromStorage)
+  window.addEventListener(WORKSPACE_CHANGED_EVENT, syncWorkspaceFromStorage)
   if (isAuthenticated.value) void loadWorkspaces()
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('aicopilot-auth-changed', syncAuthState)
-  window.removeEventListener('aicopilot-workspaces-changed', loadWorkspaces)
-  window.removeEventListener('aicopilot-workspace-changed', syncWorkspaceFromStorage)
+  window.removeEventListener(AUTH_CHANGED_EVENT, syncAuthState)
+  window.removeEventListener(WORKSPACES_CHANGED_EVENT, loadWorkspaces)
+  window.removeEventListener(WORKSPACE_CHANGED_EVENT, syncWorkspaceFromStorage)
 })
 </script>
 

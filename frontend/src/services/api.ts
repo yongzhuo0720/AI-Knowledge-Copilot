@@ -1,3 +1,4 @@
+import { AUTH_CHANGED_EVENT } from '@/services/crossTabSync'
 export interface ApiResponse<T> {
   code: string
   message: string
@@ -163,8 +164,7 @@ export interface WorkspaceOverview {
   }>
 }
 
-function userHeaders(userId: number): HeadersInit {
-  void userId
+function userHeaders(): HeadersInit {
   const token = localStorage.getItem('accessToken')
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
@@ -183,7 +183,7 @@ function handleAuthenticationFailure() {
   localStorage.removeItem('accessToken')
   localStorage.removeItem('currentUser')
   localStorage.removeItem('activeWorkspaceId')
-  window.dispatchEvent(new Event('aicopilot-auth-changed'))
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT))
 }
 
 export async function login(email: string, password: string, asAdmin = false): Promise<ApiResponse<LoginResponse>> {
@@ -205,7 +205,7 @@ export async function login(email: string, password: string, asAdmin = false): P
  */
 export async function logout(): Promise<void> {
   try {
-    await fetch('/api/v1/users/logout', { method: 'POST', headers: userHeaders(0) })
+    await fetch('/api/v1/users/logout', { method: 'POST', headers: userHeaders() })
   } catch {
     // 网络异常时也要保证本地登出成功，静默处理
   }
@@ -220,27 +220,22 @@ export async function registerUser(username: string, email: string, password: st
   return parseResponse(response, '注册失败')
 }
 
-export async function getHealth(): Promise<ApiResponse<{ status: string }>> {
-  const response = await fetch('/api/v1/health')
-  return parseResponse<{ status: string }>(response, '请求失败')
-}
-
 export async function createWorkspace(userId: number, name: string): Promise<ApiResponse<Workspace>> {
   const response = await fetch('/api/v1/workspaces', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
+    headers: { 'Content-Type': 'application/json', ...userHeaders() },
     body: JSON.stringify({ name, ownerUserId: userId }),
   })
   return parseResponse<Workspace>(response, '创建工作空间失败')
 }
 
 export async function listWorkspaces(userId: number): Promise<ApiResponse<Workspace[]>> {
-  const response = await fetch('/api/v1/workspaces', { headers: userHeaders(userId) })
+  const response = await fetch('/api/v1/workspaces', { headers: userHeaders() })
   return parseResponse<Workspace[]>(response, '获取工作空间失败')
 }
 
 export async function listWorkspaceMembers(userId: number, workspaceId: number): Promise<ApiResponse<WorkspaceMember[]>> {
-  const response = await fetch(`/api/v1/workspaces/${workspaceId}/members`, { headers: userHeaders(userId) })
+  const response = await fetch(`/api/v1/workspaces/${workspaceId}/members`, { headers: userHeaders() })
   return parseResponse<WorkspaceMember[]>(response, '获取工作空间成员失败')
 }
 
@@ -252,14 +247,14 @@ export async function addWorkspaceMember(
 ): Promise<ApiResponse<WorkspaceMember>> {
   const response = await fetch(`/api/v1/workspaces/${workspaceId}/members`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
+    headers: { 'Content-Type': 'application/json', ...userHeaders() },
     body: JSON.stringify({ userId: memberUserId, role }),
   })
   return parseResponse<WorkspaceMember>(response, '添加工作空间成员失败')
 }
 
 export async function getWorkspaceOverview(userId: number, workspaceId: number): Promise<ApiResponse<WorkspaceOverview>> {
-  const response = await fetch(`/api/v1/workspaces/${workspaceId}/overview`, { headers: userHeaders(userId) })
+  const response = await fetch(`/api/v1/workspaces/${workspaceId}/overview`, { headers: userHeaders() })
   return parseResponse<WorkspaceOverview>(response, '获取工作空间概览失败')
 }
 
@@ -271,28 +266,15 @@ export async function createKnowledgeBase(
 ): Promise<ApiResponse<KnowledgeBase>> {
   const response = await fetch('/api/v1/knowledge-bases', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
+    headers: { 'Content-Type': 'application/json', ...userHeaders() },
     body: JSON.stringify({ workspaceId, name, description }),
   })
   return parseResponse<KnowledgeBase>(response, '创建知识库失败')
 }
 
 export async function listKnowledgeBases(userId: number, workspaceId: number): Promise<ApiResponse<KnowledgeBase[]>> {
-  const response = await fetch(`/api/v1/knowledge-bases?workspaceId=${workspaceId}`, { headers: userHeaders(userId) })
+  const response = await fetch(`/api/v1/knowledge-bases?workspaceId=${workspaceId}`, { headers: userHeaders() })
   return parseResponse<KnowledgeBase[]>(response, '获取知识库失败')
-}
-
-export async function registerDocument(
-  userId: number,
-  knowledgeBaseId: number,
-  document: Omit<KnowledgeDocument, 'id' | 'knowledgeBaseId' | 'status' | 'createdAt'>,
-): Promise<ApiResponse<KnowledgeDocument>> {
-  const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
-    body: JSON.stringify(document),
-  })
-  return parseResponse<KnowledgeDocument>(response, '登记文档失败')
 }
 
 export async function uploadDocument(
@@ -304,14 +286,14 @@ export async function uploadDocument(
   formData.append('file', file)
   const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents/upload`, {
     method: 'POST',
-    headers: userHeaders(userId),
+    headers: userHeaders(),
     body: formData,
   })
   return parseResponse<KnowledgeDocument>(response, '上传文档失败')
 }
 
 export async function listDocuments(userId: number, knowledgeBaseId: number): Promise<ApiResponse<KnowledgeDocument[]>> {
-  const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents`, { headers: userHeaders(userId) })
+  const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents`, { headers: userHeaders() })
   return parseResponse<KnowledgeDocument[]>(response, '获取文档列表失败')
 }
 
@@ -325,7 +307,7 @@ export async function listWorkspaceDocuments(
   if (filters.status && filters.status !== 'ALL') params.set('status', filters.status)
   if (filters.knowledgeBaseId) params.set('knowledgeBaseId', String(filters.knowledgeBaseId))
   const queryString = params.toString()
-  const response = await fetch(`/api/v1/workspaces/${workspaceId}/documents${queryString ? `?${queryString}` : ''}`, { headers: userHeaders(userId) })
+  const response = await fetch(`/api/v1/workspaces/${workspaceId}/documents${queryString ? `?${queryString}` : ''}`, { headers: userHeaders() })
   return parseResponse<WorkspaceDocument[]>(response, '获取 Workspace 文档失败')
 }
 
@@ -336,7 +318,7 @@ export async function refreshDocumentProcessingStatus(
 ): Promise<ApiResponse<KnowledgeDocument>> {
   const response = await fetch(
     `/api/v1/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/processing-status`,
-    { headers: userHeaders(userId) },
+    { headers: userHeaders() },
   )
   return parseResponse<KnowledgeDocument>(response, '查询解析状态失败')
 }
@@ -348,7 +330,7 @@ export async function reparseDocument(
 ): Promise<ApiResponse<KnowledgeDocument>> {
   const response = await fetch(
     `/api/v1/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/reparse`,
-    { method: 'POST', headers: userHeaders(userId) },
+    { method: 'POST', headers: userHeaders() },
   )
   return parseResponse<KnowledgeDocument>(response, '重新解析文档失败')
 }
@@ -360,7 +342,7 @@ export async function retryDocumentProcessing(
 ): Promise<ApiResponse<KnowledgeDocument>> {
   const response = await fetch(
     `/api/v1/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/processing-retry`,
-    { method: 'POST', headers: userHeaders(userId) },
+    { method: 'POST', headers: userHeaders() },
   )
   return parseResponse<KnowledgeDocument>(response, '重试解析任务失败')
 }
@@ -374,7 +356,7 @@ export async function searchKnowledge(
 ): Promise<ApiResponse<KnowledgeRetrievalChunk[]>> {
   const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/search`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
+    headers: { 'Content-Type': 'application/json', ...userHeaders() },
     // mode / limit 留空则由服务端配置决定，避免前端硬编码默认值
     body: JSON.stringify({ query, ...(mode ? { mode } : {}), ...(limit ? { limit } : {}) }),
   })
@@ -383,22 +365,9 @@ export async function searchKnowledge(
 
 export async function askKnowledge(userId: number, knowledgeBaseId: number, question: string): Promise<ApiResponse<KnowledgeAnswer>> {
   const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/answer`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', ...userHeaders(userId) }, body: JSON.stringify({ question }),
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...userHeaders() }, body: JSON.stringify({ question }),
   })
   return parseResponse<KnowledgeAnswer>(response, '知识问答失败')
-}
-
-export async function runKnowledgeAgent(
-  userId: number,
-  knowledgeBaseId: number,
-  question: string,
-): Promise<ApiResponse<KnowledgeAgentAnswer>> {
-  const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/agents/knowledge`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
-    body: JSON.stringify({ question }),
-  })
-  return parseResponse<KnowledgeAgentAnswer>(response, 'Agent 执行失败')
 }
 
 export async function createConversation(
@@ -408,7 +377,7 @@ export async function createConversation(
 ): Promise<ApiResponse<ConversationSession>> {
   const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/conversations`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
+    headers: { 'Content-Type': 'application/json', ...userHeaders() },
     body: JSON.stringify({ title }),
   })
   return parseResponse<ConversationSession>(response, '创建会话失败')
@@ -431,7 +400,7 @@ export async function listConversations(
   if (query.trim()) params.set('query', query.trim())
   const response = await fetch(
     `/api/v1/knowledge-bases/${knowledgeBaseId}/conversations?${params.toString()}`,
-    { headers: userHeaders(userId) },
+    { headers: userHeaders() },
   )
   return parseResponse<PageResponse<ConversationSession>>(response, '获取会话列表失败')
 }
@@ -453,7 +422,7 @@ export async function listConversationMessages(
   const params = new URLSearchParams({ page: String(page), size: String(size) })
   const response = await fetch(
     `/api/v1/knowledge-bases/${knowledgeBaseId}/conversations/${sessionId}/messages?${params.toString()}`,
-    { headers: userHeaders(userId) },
+    { headers: userHeaders() },
   )
   return parseResponse<PageResponse<ConversationMessage>>(response, '获取会话消息失败')
 }
@@ -466,7 +435,7 @@ export async function renameConversation(
 ): Promise<ApiResponse<ConversationSession>> {
   const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/conversations/${sessionId}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
+    headers: { 'Content-Type': 'application/json', ...userHeaders() },
     body: JSON.stringify({ title }),
   })
   return parseResponse<ConversationSession>(response, '重命名会话失败')
@@ -479,7 +448,7 @@ export async function deleteConversation(
 ): Promise<void> {
   const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/conversations/${sessionId}`, {
     method: 'DELETE',
-    headers: userHeaders(userId),
+    headers: userHeaders(),
   })
   if (!response.ok) {
     if (response.status === 401) handleAuthenticationFailure()
@@ -498,7 +467,7 @@ export async function askConversation(
     `/api/v1/knowledge-bases/${knowledgeBaseId}/conversations/${sessionId}/messages`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
+      headers: { 'Content-Type': 'application/json', ...userHeaders() },
       body: JSON.stringify({ question }),
     },
   )
@@ -515,7 +484,7 @@ export async function askConversationAgent(
     `/api/v1/knowledge-bases/${knowledgeBaseId}/conversations/${sessionId}/agent-messages`,
     {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...userHeaders(userId) },
+      headers: { 'Content-Type': 'application/json', ...userHeaders() },
       body: JSON.stringify({ question }),
     },
   )
@@ -539,7 +508,7 @@ export async function streamConversation(
 ): Promise<void> {
   const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/conversations/${sessionId}/messages/stream`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...userHeaders(userId) },
+    headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', ...userHeaders() },
     body: JSON.stringify({ question }),
     signal,
   })
@@ -619,7 +588,7 @@ export interface AdminOverview {
 }
 
 function adminJsonHeaders(): HeadersInit {
-  return { 'Content-Type': 'application/json', ...userHeaders(0) }
+  return { 'Content-Type': 'application/json', ...userHeaders() }
 }
 
 function withQuery(path: string, query?: string): string {
@@ -628,12 +597,12 @@ function withQuery(path: string, query?: string): string {
 }
 
 export async function getAdminOverview(): Promise<ApiResponse<AdminOverview>> {
-  const response = await fetch('/api/v1/admin/overview', { headers: userHeaders(0) })
+  const response = await fetch('/api/v1/admin/overview', { headers: userHeaders() })
   return parseResponse<AdminOverview>(response, '获取后台概览失败')
 }
 
 export async function listAdminUsers(query?: string): Promise<ApiResponse<AdminUser[]>> {
-  const response = await fetch(withQuery('/api/v1/admin/users', query), { headers: userHeaders(0) })
+  const response = await fetch(withQuery('/api/v1/admin/users', query), { headers: userHeaders() })
   return parseResponse<AdminUser[]>(response, '获取用户列表失败')
 }
 
@@ -658,7 +627,7 @@ export async function updateAdminUserAdmin(userId: number, isAdmin: boolean): Pr
 export async function deleteAdminUser(userId: number): Promise<void> {
   const response = await fetch(`/api/v1/admin/users/${userId}`, {
     method: 'DELETE',
-    headers: userHeaders(0),
+    headers: userHeaders(),
   })
   if (!response.ok) {
     if (response.status === 401) handleAuthenticationFailure()
@@ -668,14 +637,14 @@ export async function deleteAdminUser(userId: number): Promise<void> {
 }
 
 export async function listAdminWorkspaces(query?: string): Promise<ApiResponse<AdminWorkspace[]>> {
-  const response = await fetch(withQuery('/api/v1/admin/workspaces', query), { headers: userHeaders(0) })
+  const response = await fetch(withQuery('/api/v1/admin/workspaces', query), { headers: userHeaders() })
   return parseResponse<AdminWorkspace[]>(response, '获取工作空间列表失败')
 }
 
 export async function deleteAdminWorkspace(workspaceId: number): Promise<void> {
   const response = await fetch(`/api/v1/admin/workspaces/${workspaceId}`, {
     method: 'DELETE',
-    headers: userHeaders(0),
+    headers: userHeaders(),
   })
   if (!response.ok) {
     if (response.status === 401) handleAuthenticationFailure()
@@ -685,14 +654,14 @@ export async function deleteAdminWorkspace(workspaceId: number): Promise<void> {
 }
 
 export async function listAdminKnowledgeBases(query?: string): Promise<ApiResponse<AdminKnowledgeBase[]>> {
-  const response = await fetch(withQuery('/api/v1/admin/knowledge-bases', query), { headers: userHeaders(0) })
+  const response = await fetch(withQuery('/api/v1/admin/knowledge-bases', query), { headers: userHeaders() })
   return parseResponse<AdminKnowledgeBase[]>(response, '获取知识库列表失败')
 }
 
 export async function deleteAdminKnowledgeBase(knowledgeBaseId: number): Promise<void> {
   const response = await fetch(`/api/v1/admin/knowledge-bases/${knowledgeBaseId}`, {
     method: 'DELETE',
-    headers: userHeaders(0),
+    headers: userHeaders(),
   })
   if (!response.ok) {
     if (response.status === 401) handleAuthenticationFailure()

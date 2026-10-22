@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { WORKSPACE_CHANGED_EVENT } from '@/services/crossTabSync'
 
 import {
   addWorkspaceMember,
@@ -53,7 +54,7 @@ async function loadMembers() {
 async function changeWorkspace() {
   localStorage.setItem('activeWorkspaceId', workspaceId.value)
   // 局部切换必须通知全局侧栏（App.vue 与跨标签同步都监听这个事件）
-  window.dispatchEvent(new CustomEvent('aicopilot-workspace-changed', { detail: { workspaceId: workspaceId.value } }))
+  window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT, { detail: { workspaceId: workspaceId.value } }))
   await loadMembers()
 }
 
@@ -80,12 +81,12 @@ function syncWorkspaceFromGlobal(event: Event) {
 }
 
 onMounted(() => {
-  window.addEventListener('aicopilot-workspace-changed', syncWorkspaceFromGlobal)
+  window.addEventListener(WORKSPACE_CHANGED_EVENT, syncWorkspaceFromGlobal)
   void loadContext()
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('aicopilot-workspace-changed', syncWorkspaceFromGlobal)
+  window.removeEventListener(WORKSPACE_CHANGED_EVENT, syncWorkspaceFromGlobal)
 })
 </script>
 

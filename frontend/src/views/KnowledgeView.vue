@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { AUTH_CHANGED_EVENT, WORKSPACE_CHANGED_EVENT, WORKSPACES_CHANGED_EVENT } from '@/services/crossTabSync'
 
 import {
   askConversation,
@@ -92,8 +93,8 @@ const STATUS_LABELS: Record<string, string> = {
 const statusLabel = (value: string) => STATUS_LABELS[value] ?? value
 
 onMounted(() => {
-  window.addEventListener('aicopilot-auth-changed', syncAuthState)
-  window.addEventListener('aicopilot-workspace-changed', handleGlobalWorkspaceChange)
+  window.addEventListener(AUTH_CHANGED_EVENT, syncAuthState)
+  window.addEventListener(WORKSPACE_CHANGED_EVENT, handleGlobalWorkspaceChange)
   // 上传后的解析是后台任务，页面要自己跟上状态，不能让用户反复点「刷新列表」。
   pollTimer = window.setInterval(() => {
     if (hasPendingDocuments.value && !loading.value) void loadDocuments(true)
@@ -104,8 +105,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.clearInterval(pollTimer)
   documentsRequestId += 1
-  window.removeEventListener('aicopilot-auth-changed', syncAuthState)
-  window.removeEventListener('aicopilot-workspace-changed', handleGlobalWorkspaceChange)
+  window.removeEventListener(AUTH_CHANGED_EVENT, syncAuthState)
+  window.removeEventListener(WORKSPACE_CHANGED_EVENT, handleGlobalWorkspaceChange)
 })
 
 function syncAuthState() {
@@ -150,7 +151,7 @@ async function submitAuth() {
     localStorage.setItem('currentUser', JSON.stringify(response.data.user))
     loggedIn.value = true
     message.value = `欢迎回来，${response.data.user.username}`
-    window.dispatchEvent(new Event('aicopilot-auth-changed'))
+    window.dispatchEvent(new Event(AUTH_CHANGED_EVENT))
     if (isAdminLogin) void router.push('/admin')
   } catch (error) {
     // 后端返回的是英文，管理员登录失败时给一句明确的中文提示
@@ -173,7 +174,7 @@ async function signOut() {
   currentUser.value = null; userId.value = ''; loggedIn.value = false
   workspaces.value = []; knowledgeBases.value = []; workspaceId.value = ''; knowledgeBaseId.value = ''
   knowledgeBase.value = null; documents.value = []; sessions.value = []; messages.value = []; currentSession.value = null
-  window.dispatchEvent(new Event('aicopilot-auth-changed'))
+  window.dispatchEvent(new Event(AUTH_CHANGED_EVENT))
 }
 
 async function restoreWorkspaceContext() {
@@ -205,7 +206,7 @@ async function loadKnowledgeBases() {
 async function handleWorkspaceChange(notifyShell = true) {
   if (workspaceId.value) {
     localStorage.setItem('activeWorkspaceId', workspaceId.value)
-    if (notifyShell) window.dispatchEvent(new CustomEvent('aicopilot-workspace-changed', { detail: { workspaceId: workspaceId.value } }))
+    if (notifyShell) window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT, { detail: { workspaceId: workspaceId.value } }))
   }
   knowledgeBase.value = null
   knowledgeBaseId.value = ''
@@ -250,7 +251,7 @@ async function createWorkspace() {
     knowledgeBase.value = null
     knowledgeBaseId.value = ''
     message.value = `工作空间已创建：${response.data.name}（ID ${response.data.id}）`
-    window.dispatchEvent(new Event('aicopilot-workspaces-changed'))
+    window.dispatchEvent(new Event(WORKSPACES_CHANGED_EVENT))
     await handleWorkspaceChange(false)
   } catch (error) { showError(error, '创建工作空间失败')
   } finally { loading.value = false }

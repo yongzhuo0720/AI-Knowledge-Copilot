@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
+import { AUTH_CHANGED_EVENT, WORKSPACE_CHANGED_EVENT } from '@/services/crossTabSync'
 
 import { getWorkspaceOverview, type WorkspaceOverview } from '@/services/api'
 
@@ -52,14 +53,14 @@ async function loadOverview() {
 }
 
 onMounted(() => {
-  window.addEventListener('aicopilot-auth-changed', loadOverview)
-  window.addEventListener('aicopilot-workspace-changed', loadOverview)
+  window.addEventListener(AUTH_CHANGED_EVENT, loadOverview)
+  window.addEventListener(WORKSPACE_CHANGED_EVENT, loadOverview)
   void loadOverview()
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('aicopilot-auth-changed', loadOverview)
-  window.removeEventListener('aicopilot-workspace-changed', loadOverview)
+  window.removeEventListener(AUTH_CHANGED_EVENT, loadOverview)
+  window.removeEventListener(WORKSPACE_CHANGED_EVENT, loadOverview)
 })
 </script>
 

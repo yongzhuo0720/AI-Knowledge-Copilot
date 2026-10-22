@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { AUTH_CHANGED_EVENT, WORKSPACE_CHANGED_EVENT } from '@/services/crossTabSync'
 
 import {
   listKnowledgeBases,
@@ -136,7 +137,7 @@ async function changeWorkspace() {
   documentsRequestId += 1
   documents.value = []
   loading.value = true
-  try { await loadKnowledgeBases(); await loadDocuments(); window.dispatchEvent(new CustomEvent('aicopilot-workspace-changed', { detail: { workspaceId: workspaceId.value } })) }
+  try { await loadKnowledgeBases(); await loadDocuments(); window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT, { detail: { workspaceId: workspaceId.value } })) }
   catch (error) { message.value = error instanceof Error ? error.message : '切换工作空间失败' }
   finally { loading.value = false }
 }
@@ -184,8 +185,8 @@ async function retry(document: WorkspaceDocument) {
 }
 
 onMounted(() => {
-  window.addEventListener('aicopilot-auth-changed', loadContext)
-  window.addEventListener('aicopilot-workspace-changed', loadContext)
+  window.addEventListener(AUTH_CHANGED_EVENT, loadContext)
+  window.addEventListener(WORKSPACE_CHANGED_EVENT, loadContext)
   // 文档从上传到可检索要经过解析、切片、embedding，界面必须自己跟上状态，
   // 否则用户只能靠手动点「查询」才能知道处理完没有。
   pollTimer = window.setInterval(() => {
@@ -197,8 +198,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.clearInterval(pollTimer)
   documentsRequestId += 1
-  window.removeEventListener('aicopilot-auth-changed', loadContext)
-  window.removeEventListener('aicopilot-workspace-changed', loadContext)
+  window.removeEventListener(AUTH_CHANGED_EVENT, loadContext)
+  window.removeEventListener(WORKSPACE_CHANGED_EVENT, loadContext)
 })
 </script>
 

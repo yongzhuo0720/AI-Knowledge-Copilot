@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { AUTH_CHANGED_EVENT, WORKSPACE_CHANGED_EVENT } from '@/services/crossTabSync'
 
 import {
   createConversation,
@@ -192,7 +193,7 @@ async function changeWorkspace() {
   abortStream()
   localStorage.setItem('activeWorkspaceId', workspaceId.value)
   // 局部切换必须通知全局侧栏（App.vue 与跨标签同步都监听这个事件）
-  window.dispatchEvent(new CustomEvent('aicopilot-workspace-changed', { detail: { workspaceId: workspaceId.value } }))
+  window.dispatchEvent(new CustomEvent(WORKSPACE_CHANGED_EVENT, { detail: { workspaceId: workspaceId.value } }))
   knowledgeBaseId.value = ''
   resetConversationState()
   await loadKnowledgeBases()
@@ -439,8 +440,8 @@ function handleComposerKeydown(event: KeyboardEvent) {
 }
 
 onMounted(() => {
-  window.addEventListener('aicopilot-auth-changed', loadContext)
-  window.addEventListener('aicopilot-workspace-changed', loadContext)
+  window.addEventListener(AUTH_CHANGED_EVENT, loadContext)
+  window.addEventListener(WORKSPACE_CHANGED_EVENT, loadContext)
   void loadContext()
 })
 
@@ -448,8 +449,8 @@ onBeforeUnmount(() => {
   abortStream()
   sessionListRequestId += 1
   messageRequestId += 1
-  window.removeEventListener('aicopilot-auth-changed', loadContext)
-  window.removeEventListener('aicopilot-workspace-changed', loadContext)
+  window.removeEventListener(AUTH_CHANGED_EVENT, loadContext)
+  window.removeEventListener(WORKSPACE_CHANGED_EVENT, loadContext)
 })
 </script>
 
