@@ -473,23 +473,6 @@ export async function deleteConversation(
   }
 }
 
-export async function askConversation(
-  userId: number,
-  knowledgeBaseId: number,
-  sessionId: number,
-  question: string,
-): Promise<ApiResponse<ConversationReply>> {
-  const response = await fetch(
-    `/api/v1/knowledge-bases/${knowledgeBaseId}/conversations/${sessionId}/messages`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...userHeaders() },
-      body: JSON.stringify({ question }),
-    },
-  )
-  return parseResponse<ConversationReply>(response, '会话问答失败')
-}
-
 export async function askConversationAgent(
   userId: number,
   knowledgeBaseId: number,

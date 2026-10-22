@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { WORKSPACE_CHANGED_EVENT } from '@/services/crossTabSync'
 
 import {
@@ -19,6 +20,7 @@ function readStoredUser(): StoredUser | null {
 }
 
 const currentUser = ref<StoredUser | null>(readStoredUser())
+const router = useRouter()
 const workspaces = ref<Workspace[]>([])
 const workspaceId = ref(localStorage.getItem('activeWorkspaceId') ?? '')
 const members = ref<WorkspaceMember[]>([])
@@ -96,6 +98,7 @@ onBeforeUnmount(() => {
     <section class="settings-grid">
       <section class="panel settings-card"><div class="settings-card-heading"><div><p class="eyebrow">当前空间</p><h2>当前空间</h2></div><span class="section-meta">{{ activeWorkspace ? `#${activeWorkspace.id}` : '—' }}</span></div><label>选择工作空间<select v-model="workspaceId" :disabled="loading || !workspaces.length" @change="changeWorkspace"><option v-for="workspace in workspaces" :key="workspace.id" :value="String(workspace.id)">{{ workspace.name }}</option></select></label><div v-if="activeWorkspace" class="settings-facts"><span>所有者</span><strong>用户 #{{ activeWorkspace.ownerUserId }}</strong><span>成员数</span><strong>{{ members.length }} 人</strong></div></section>
       <section class="panel settings-card"><div class="settings-card-heading"><div><p class="eyebrow">成员</p><h2>成员与角色</h2></div><span class="section-meta">{{ members.length }} 人</span></div><form v-if="canManageMembers" class="member-form" @submit.prevent="submitMember"><label>用户 ID<input v-model="memberUserId" inputmode="numeric" min="1" placeholder="例如：2" /></label><label>角色<select v-model="memberRole"><option value="MEMBER">普通成员</option><option value="ADMIN">管理员</option></select></label><button class="primary-button" :disabled="loading || !memberUserId" type="submit">添加成员 <span>→</span></button></form><p v-else class="settings-notice">你是普通成员，只能查看当前空间成员。</p><div v-if="members.length" class="member-list"><article v-for="member in members" :key="member.userId" class="member-row"><span class="user-avatar">{{ String(member.userId).slice(-2) }}</span><div><strong>用户 #{{ member.userId }}</strong><small>{{ member.joinedAt ? new Date(member.joinedAt).toLocaleDateString('zh-CN') : '刚刚加入' }}</small></div><span class="status-pill" :class="member.role === 'OWNER' ? 'active' : ''">{{ roleLabel(member.role) }}</span></article></div><div v-else class="settings-empty">当前空间还没有成员信息。</div></section>
+      <section class="panel settings-card settings-tools-card"><div class="settings-card-heading"><div><p class="eyebrow">开发者工具</p><h2>检索调试</h2></div></div><p class="settings-notice">并排运行向量 / 关键词 / 混合检索，检查召回与分值，用于调参和排查「为什么没检索到」。</p><button class="secondary-button" type="button" @click="router.push('/retrieval')">打开检索调试 <span>→</span></button></section>
     </section>
     <p v-if="message" class="message settings-message" :class="{ 'message-error': message.includes('失败') || message.includes('错误') }">{{ message }}</p>
   </main>

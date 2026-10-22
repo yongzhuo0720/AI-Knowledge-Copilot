@@ -28,7 +28,7 @@ import static org.mockito.Mockito.never;
 class ConversationServiceTest {
 
     @Test
-    void savesUserAndAssistantMessagesWithSources() {
+    void streamsUserSourcesAndCompletionWithAssistantSources() {
         ConversationRepository repository = mock(ConversationRepository.class);
         KnowledgeService knowledgeService = mock(KnowledgeService.class);
         KnowledgeAnswerClient answerClient = mock(KnowledgeAnswerClient.class);
@@ -42,15 +42,19 @@ class ConversationServiceTest {
             return new ConversationMessage(message.role().equals("USER") ? 2L : 3L, message.sessionId(),
                     message.role(), message.content(), Instant.now(), message.sources());
         });
-        when(answerClient.answer(20L, "当前问题", List.of(previous)))
+        when(answerClient.stream(eq(20L), eq("当前问题"), eq(List.of(previous)), any()))
                 .thenReturn(new KnowledgeAnswer("回答内容", List.of(source)));
+        List<ConversationStreamEvent> events = new java.util.ArrayList<>();
 
-        ConversationReply reply = new ConversationService(repository, knowledgeService, answerClient, mock(KnowledgeAgentClient.class))
-                .ask(3L, 20L, 7L, new CreateMessageRequest("当前问题"));
+        new ConversationService(repository, knowledgeService, answerClient, mock(KnowledgeAgentClient.class))
+                .streamAsk(3L, 20L, 7L, new CreateMessageRequest("当前问题"), events::add);
 
-        assertThat(reply.userMessage().role()).isEqualTo("USER");
-        assertThat(reply.assistantMessage().content()).isEqualTo("回答内容");
-        assertThat(reply.assistantMessage().sources()).containsExactly(source);
+        assertThat(events).extracting(ConversationStreamEvent::event)
+                .containsExactly("user", "sources", "complete");
+        ConversationReply complete = (ConversationReply) events.get(2).data();
+        assertThat(complete.userMessage().role()).isEqualTo("USER");
+        assertThat(complete.assistantMessage().content()).isEqualTo("回答内容");
+        assertThat(complete.assistantMessage().sources()).containsExactly(source);
         verify(knowledgeService).assertKnowledgeBaseAccess(20L, 3L);
         verify(repository).touchSession(7L);
     }
@@ -68,10 +72,11 @@ class ConversationServiceTest {
             return new ConversationMessage(9L, message.sessionId(), message.role(), message.content(),
                     Instant.now(), message.sources());
         });
-        when(answerClient.answer(20L, "当前问题", List.of())).thenReturn(new KnowledgeAnswer("回答", List.of()));
+        when(answerClient.stream(eq(20L), eq("当前问题"), eq(List.of()), any()))
+                .thenReturn(new KnowledgeAnswer("回答", List.of()));
 
         new ConversationService(repository, knowledgeService, answerClient, mock(KnowledgeAgentClient.class))
-                .ask(3L, 20L, 7L, new CreateMessageRequest("当前问题"));
+                .streamAsk(3L, 20L, 7L, new CreateMessageRequest("当前问题"), event -> { });
 
         // 这条断言守的是「成本不会随会话长度无界增长」：
         // 无论会话聊到第 3 轮还是第 300 轮，喂给模型的历史都只能是最近 20 条。

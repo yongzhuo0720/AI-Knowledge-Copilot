@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import AgentView from '../AgentView.vue'
 import ChatView from '../ChatView.vue'
+import DocumentsView from '../DocumentsView.vue'
 import KnowledgeView from '../KnowledgeView.vue'
 import RetrievalView from '../RetrievalView.vue'
 import SettingsView from '../SettingsView.vue'
@@ -17,6 +18,7 @@ vi.mock('@/services/api', async (importOriginal) => ({
   listConversationMessages: vi.fn(),
   listWorkspaceMembers: vi.fn(),
   listDocuments: vi.fn(),
+  listWorkspaceDocuments: vi.fn(),
   searchKnowledge: vi.fn(),
   askKnowledge: vi.fn(),
   logout: vi.fn(),
@@ -50,6 +52,7 @@ beforeEach(() => {
   vi.mocked(api.listConversationMessages).mockResolvedValue(page([]))
   vi.mocked(api.listWorkspaceMembers).mockResolvedValue(response([]))
   vi.mocked(api.listDocuments).mockResolvedValue(response([]))
+  vi.mocked(api.listWorkspaceDocuments).mockResolvedValue(response([]))
   vi.mocked(api.logout).mockResolvedValue()
 })
 
@@ -119,8 +122,8 @@ it('检索调试保留所选模式的结果，并把 Top-K 发给后端', async 
   expect(wrapper.find('.retrieval-chunk-list').text()).not.toContain('默认回答来源')
 })
 
-it('知识库上传入口接受表格、演示文稿与网页格式', async () => {
-  wrapper = mount(KnowledgeView)
+it('文档页上传入口接受表格、演示文稿与网页格式', async () => {
+  wrapper = mount(DocumentsView)
   await flushPromises()
 
   const accept = wrapper.find('input[type="file"]').attributes('accept') ?? ''

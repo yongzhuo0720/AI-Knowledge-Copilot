@@ -106,18 +106,6 @@ public class ConversationController {
         conversationService.deleteSession(authenticatedUserId(httpRequest), knowledgeBaseId, sessionId);
     }
 
-    @PostMapping("/{sessionId}/messages")
-    public ApiResponse<ConversationReply> ask(
-            @PathVariable Long knowledgeBaseId,
-            @PathVariable Long sessionId,
-            HttpServletRequest httpRequest,
-            @Valid @RequestBody CreateMessageRequest request
-    ) {
-        Long userId = authenticatedUserId(httpRequest);
-        consumeAskQuota(userId);
-        return ApiResponse.success(conversationService.ask(userId, knowledgeBaseId, sessionId, request));
-    }
-
     @PostMapping("/{sessionId}/agent-messages")
     public ApiResponse<ConversationReply> askAgent(
             @PathVariable Long knowledgeBaseId,

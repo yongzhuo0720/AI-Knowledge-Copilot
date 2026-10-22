@@ -109,21 +109,6 @@ public class ConversationService {
     }
 
     @Transactional
-    public ConversationReply ask(Long userId, Long knowledgeBaseId, Long sessionId, CreateMessageRequest request) {
-        findOwnedSession(userId, knowledgeBaseId, sessionId);
-        List<ConversationMessage> history = recentHistory(sessionId);
-        ConversationMessage userMessage = conversationRepository.saveMessage(new ConversationMessage(
-                null, sessionId, "USER", request.question().trim(), Instant.now(), List.of()
-        ));
-        KnowledgeAnswer answer = answerClient.answer(knowledgeBaseId, request.question().trim(), history);
-        ConversationMessage assistantMessage = conversationRepository.saveMessage(new ConversationMessage(
-                null, sessionId, "ASSISTANT", answer.answer(), Instant.now(), answer.sources()
-        ));
-        conversationRepository.touchSession(sessionId);
-        return new ConversationReply(userMessage, assistantMessage);
-    }
-
-    @Transactional
     public ConversationReply askAgent(Long userId, Long knowledgeBaseId, Long sessionId, CreateMessageRequest request) {
         findOwnedSession(userId, knowledgeBaseId, sessionId);
         List<ConversationMessage> history = recentHistory(sessionId);
