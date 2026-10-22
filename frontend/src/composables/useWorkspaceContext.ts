@@ -109,6 +109,11 @@ function onContextChange(listener: ContextListener): () => void {
   return () => { listeners.delete(listener) }
 }
 
+/** 按视图本地的知识库选中值找到对应知识库（视图存字符串，后端 id 是数字）。 */
+function findKnowledgeBase(knowledgeBaseId: string): KnowledgeBase | undefined {
+  return knowledgeBases.value.find((item) => item.id === Number(knowledgeBaseId))
+}
+
 export function useWorkspaceContext() {
   installListeners()
   return {
@@ -121,5 +126,6 @@ export function useWorkspaceContext() {
     loadKnowledgeBases,
     switchWorkspace,
     onContextChange,
+    findKnowledgeBase,
   }
 }

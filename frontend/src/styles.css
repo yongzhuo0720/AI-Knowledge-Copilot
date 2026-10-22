@@ -429,8 +429,8 @@ textarea { min-height: 80px; resize: vertical; }
 .agent-step small { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .agent-step .status-pill { flex-shrink: 0; }
 .agent-answer-text { margin: 0; color: var(--ink); font-size: 14px; line-height: 1.8; white-space: pre-wrap; }
-.agent-sources { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
-.agent-source { padding: 2px 8px; border: 1px solid var(--line-muted); border-radius: 999px; background: var(--surface-muted); color: var(--muted); font-family: var(--mono); font-size: 11px; }
+.source-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 16px; }
+.source-chip { padding: 2px 8px; border: 1px solid var(--line-muted); border-radius: 999px; background: var(--surface-muted); color: var(--muted); font-family: var(--mono); font-size: 11px; }
 
 /* ==========================================================================
    检索调试（RetrievalView）
@@ -483,8 +483,7 @@ textarea { min-height: 80px; resize: vertical; }
 .retrieval-code pre { overflow: auto; max-height: 260px; margin: 0; padding: 12px; border: 1px solid var(--line-muted); border-radius: var(--radius); background: var(--surface-muted); color: var(--ink); font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
 .retrieval-answer { grid-column: 1 / -1; }
 .retrieval-answer-text { margin: 0; color: var(--ink); font-size: 14px; line-height: 1.8; white-space: pre-wrap; }
-.retrieval-answer-sources { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
-.retrieval-answer-source { padding: 2px 8px; border: 1px solid var(--line-muted); border-radius: 999px; background: var(--surface-muted); color: var(--muted); font-family: var(--mono); font-size: 11px; }
+
 
 /* ==========================================================================
    文档资产（DocumentsView）

@@ -14,10 +14,11 @@ import { looksLikeMarkdown, renderMarkdown } from '@/services/markdown'
 import { resultUnit, toAgentAnswer } from '@/services/agentTrace'
 import { SPARK_ICON } from '@/services/icons'
 import { isSendHotkey } from '@/services/input'
+import SourceChips from '@/components/SourceChips.vue'
 import { useChatSessions } from '@/composables/useChatSessions'
 import { useWorkspaceContext } from '@/composables/useWorkspaceContext'
 
-const { currentUser, workspaces, workspaceId, knowledgeBases, loadContext, switchWorkspace, onContextChange } = useWorkspaceContext()
+const { currentUser, workspaces, workspaceId, knowledgeBases, loadContext, switchWorkspace, onContextChange, findKnowledgeBase } = useWorkspaceContext()
 
 const knowledgeBaseId = ref('')
 
@@ -53,7 +54,7 @@ watch(hasMoreSessions, (truncated) => {
   if (truncated) message.value = `会话较多，这里只列出最近 ${MAX_PAGE_SIZE} 个，请到 AI 会话页搜索更早的会话。`
 })
 
-const activeKnowledgeBase = computed(() => knowledgeBases.value.find((item) => item.id === Number(knowledgeBaseId.value)))
+const activeKnowledgeBase = computed(() => findKnowledgeBase(knowledgeBaseId.value))
 
 /** 上下文（登录态 / 工作空间 / 知识库）由 useWorkspaceContext 维护；这里只跟着刷新会话链。 */
 onContextChange(({ workspaceChanged }) => {
@@ -156,6 +157,6 @@ onMounted(async () => {
     <p v-if="message" class="message agent-message">{{ message }}</p>
     <section class="agent-flow"><article class="agent-flow-step panel"><span>01</span><strong>规划</strong><small>理解问题并决定是否检索</small></article><span class="agent-flow-arrow">→</span><article class="agent-flow-step panel"><span>02</span><strong>工具调用</strong><small>调用 knowledge_search 等工具</small></article><span class="agent-flow-arrow">→</span><article class="agent-flow-step panel"><span>03</span><strong>生成回答</strong><small>基于来源生成回答</small></article></section>
     <section v-if="!result" class="agent-empty panel"><span class="answer-icon" v-html="SPARK_ICON" /><strong>准备执行一个知识任务</strong><span>{{ activeKnowledgeBase ? `当前知识库：${activeKnowledgeBase.name}` : '先选择一个知识库' }}</span></section>
-    <section v-else class="agent-result-grid"><section class="agent-steps panel"><div class="agent-section-heading"><div><p class="eyebrow">执行轨迹</p><h2>执行轨迹</h2></div><span class="section-meta">{{ result.steps.length }} 个步骤</span></div><article v-for="(step, index) in result.steps" :key="`${step.tool}-${index}`" class="agent-step"><span class="source-index">{{ index + 1 }}</span><div><strong>{{ step.tool }}</strong><small>{{ step.query }}</small></div><span class="status-pill status-completed">{{ step.resultCount }} {{ resultUnit(step.tool) }}</span></article></section><section class="agent-answer panel"><div class="agent-section-heading"><div><p class="eyebrow">Agent 回答</p><h2>最终回答</h2></div><span class="status-pill status-completed">已完成 · {{ messages.length }} 条消息</span></div><div v-if="looksLikeMarkdown(result.answer)" class="markdown-body" v-html="renderMarkdown(result.answer)" /><p v-else class="agent-answer-text">{{ result.answer }}</p><div class="agent-sources"><span class="source-label">引用来源</span><span v-for="(source, index) in result.sources" :key="`${source.documentObjectKey}-${index}`" class="agent-source">[{{ index + 1 }}] {{ source.documentObjectKey }}</span></div></section></section>
+    <section v-else class="agent-result-grid"><section class="agent-steps panel"><div class="agent-section-heading"><div><p class="eyebrow">执行轨迹</p><h2>执行轨迹</h2></div><span class="section-meta">{{ result.steps.length }} 个步骤</span></div><article v-for="(step, index) in result.steps" :key="`${step.tool}-${index}`" class="agent-step"><span class="source-index">{{ index + 1 }}</span><div><strong>{{ step.tool }}</strong><small>{{ step.query }}</small></div><span class="status-pill status-completed">{{ step.resultCount }} {{ resultUnit(step.tool) }}</span></article></section><section class="agent-answer panel"><div class="agent-section-heading"><div><p class="eyebrow">Agent 回答</p><h2>最终回答</h2></div><span class="status-pill status-completed">已完成 · {{ messages.length }} 条消息</span></div><div v-if="looksLikeMarkdown(result.answer)" class="markdown-body" v-html="renderMarkdown(result.answer)" /><p v-else class="agent-answer-text">{{ result.answer }}</p><SourceChips :sources="result.sources" /></section></section>
   </main>
 </template>
