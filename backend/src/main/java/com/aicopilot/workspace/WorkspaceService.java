@@ -17,13 +17,8 @@ public class WorkspaceService {
     }
 
     @Transactional
-    public WorkspaceResponse create(CreateWorkspaceRequest request) {
-        return create(null, request);
-    }
-
-    @Transactional
     public WorkspaceResponse create(Long userId, CreateWorkspaceRequest request) {
-        if (userId != null && !userId.equals(request.ownerUserId())) {
+        if (!userId.equals(request.ownerUserId())) {
             throw new AccessDeniedException("workspace owner must match authenticated user");
         }
         Workspace workspace = workspaceRepository.save(
@@ -48,8 +43,8 @@ public class WorkspaceService {
                 .toList();
     }
 
-    @Transactional
-    public WorkspaceMemberResponse addMember(Long workspaceId, AddWorkspaceMemberRequest request) {
+    /** 仅供 {@link #addMember(Long, Long, AddWorkspaceMemberRequest)} 在已鉴权后复用的内部实现。 */
+    private WorkspaceMemberResponse addMember(Long workspaceId, AddWorkspaceMemberRequest request) {
         String role = request.normalizedRole();
         // 成员接口只能分配 ADMIN / MEMBER。允许传 OWNER 等于允许任何 ADMIN 把自己
         // 或同伙提升为所有者，之后再改不掉 —— 所有权只能由创建者天然持有。
@@ -71,13 +66,6 @@ public class WorkspaceService {
     public WorkspaceMemberResponse addMember(Long userId, Long workspaceId, AddWorkspaceMemberRequest request) {
         authorizeOwnerOrAdmin(workspaceId, userId);
         return addMember(workspaceId, request);
-    }
-
-    @Transactional(readOnly = true)
-    public List<WorkspaceMemberResponse> findMembers(Long workspaceId) {
-        return workspaceRepository.findMembers(workspaceId).stream()
-                .map(WorkspaceMemberResponse::from)
-                .toList();
     }
 
     @Transactional(readOnly = true)

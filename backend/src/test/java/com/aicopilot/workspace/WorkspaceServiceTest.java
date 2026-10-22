@@ -21,7 +21,7 @@ class WorkspaceServiceTest {
         when(repository.save(any(Workspace.class))).thenReturn(savedWorkspace);
 
         WorkspaceResponse response = new WorkspaceService(repository)
-                .create(new CreateWorkspaceRequest(" 知识库 ", 1L));
+                .create(1L, new CreateWorkspaceRequest(" 知识库 ", 1L));
 
         assertThat(response).isEqualTo(new WorkspaceResponse(10L, "知识库", 1L));
         verify(repository).save(new Workspace(null, "知识库", 1L));
@@ -31,9 +31,10 @@ class WorkspaceServiceTest {
     @Test
     void addsMemberWithDefaultRole() {
         WorkspaceRepository repository = mock(WorkspaceRepository.class);
+        when(repository.isOwnerOrAdmin(10L, 2L)).thenReturn(true);
 
         WorkspaceMemberResponse response = new WorkspaceService(repository)
-                .addMember(10L, new AddWorkspaceMemberRequest(2L, null));
+                .addMember(2L, 10L, new AddWorkspaceMemberRequest(2L, null));
 
         assertThat(response).isEqualTo(new WorkspaceMemberResponse(10L, 2L, "MEMBER", null));
         verify(repository).addMember(new WorkspaceMember(10L, 2L, "MEMBER", null));
@@ -46,8 +47,9 @@ class WorkspaceServiceTest {
         when(repository.findMembers(10L)).thenReturn(List.of(
                 new WorkspaceMember(10L, 1L, "OWNER", joinedAt)
         ));
+        when(repository.isMember(10L, 2L)).thenReturn(true);
 
-        List<WorkspaceMemberResponse> response = new WorkspaceService(repository).findMembers(10L);
+        List<WorkspaceMemberResponse> response = new WorkspaceService(repository).findMembers(2L, 10L);
 
         assertThat(response).containsExactly(
                 new WorkspaceMemberResponse(10L, 1L, "OWNER", joinedAt)
@@ -80,9 +82,10 @@ class WorkspaceServiceTest {
     @Test
     void rejectsAssigningOwnerRoleThroughTheMemberApi() {
         WorkspaceRepository repository = mock(WorkspaceRepository.class);
+        when(repository.isOwnerOrAdmin(10L, 2L)).thenReturn(true);
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                        new WorkspaceService(repository).addMember(10L, new AddWorkspaceMemberRequest(2L, "OWNER")))
+                        new WorkspaceService(repository).addMember(2L, 10L, new AddWorkspaceMemberRequest(2L, "OWNER")))
                 .isInstanceOfSatisfying(com.aicopilot.common.exception.BusinessException.class,
                         exception -> assertThat(exception.getCode()).isEqualTo("OWNER_ROLE_PROTECTED"));
         org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).addMember(any());

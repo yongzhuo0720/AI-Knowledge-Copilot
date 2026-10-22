@@ -38,14 +38,6 @@ public class ConversationService {
     private final KnowledgeAnswerClient answerClient;
     private final KnowledgeAgentClient agentClient;
 
-    public ConversationService(
-            ConversationRepository conversationRepository,
-            KnowledgeService knowledgeService,
-            KnowledgeAnswerClient answerClient
-    ) {
-        this(conversationRepository, knowledgeService, answerClient, null);
-    }
-
     @Autowired
     public ConversationService(
             ConversationRepository conversationRepository,
@@ -134,9 +126,6 @@ public class ConversationService {
     @Transactional
     public ConversationReply askAgent(Long userId, Long knowledgeBaseId, Long sessionId, CreateMessageRequest request) {
         findOwnedSession(userId, knowledgeBaseId, sessionId);
-        if (agentClient == null) {
-            throw new IllegalStateException("knowledge agent is not configured");
-        }
         List<ConversationMessage> history = recentHistory(sessionId);
         String question = request.question().trim();
         ConversationMessage userMessage = conversationRepository.saveMessage(new ConversationMessage(

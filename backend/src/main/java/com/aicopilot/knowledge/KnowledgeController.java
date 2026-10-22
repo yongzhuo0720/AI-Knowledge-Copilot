@@ -63,18 +63,6 @@ public class KnowledgeController {
         return ApiResponse.success(knowledgeService.createKnowledgeBase(authenticatedUserId(httpRequest), request));
     }
 
-    @PostMapping("/{knowledgeBaseId}/documents")
-    @ResponseStatus(HttpStatus.CREATED)
-    public ApiResponse<KnowledgeDocumentResponse> registerDocument(
-            @PathVariable Long knowledgeBaseId,
-            HttpServletRequest httpRequest,
-            @Valid @RequestBody RegisterDocumentRequest request
-    ) {
-        Long userId = authenticatedUserId(httpRequest);
-        consumeQuota(UPLOAD_BUCKET, userId, rateLimitProperties.getUpload());
-        return ApiResponse.success(knowledgeService.registerDocument(userId, knowledgeBaseId, request));
-    }
-
     @PostMapping(value = "/{knowledgeBaseId}/documents/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
     public ApiResponse<KnowledgeDocumentResponse> uploadDocument(
@@ -154,17 +142,6 @@ public class KnowledgeController {
         Long userId = authenticatedUserId(httpRequest);
         consumeQuota(ASK_BUCKET, userId, rateLimitProperties.getAsk());
         return ApiResponse.success(knowledgeService.answer(userId, knowledgeBaseId, request));
-    }
-
-    @PostMapping("/{knowledgeBaseId}/agents/knowledge")
-    public ApiResponse<KnowledgeAgentAnswer> runKnowledgeAgent(
-            @PathVariable Long knowledgeBaseId,
-            HttpServletRequest httpRequest,
-            @Valid @RequestBody KnowledgeQuestionRequest request
-    ) {
-        Long userId = authenticatedUserId(httpRequest);
-        consumeQuota(ASK_BUCKET, userId, rateLimitProperties.getAsk());
-        return ApiResponse.success(knowledgeService.runAgent(userId, knowledgeBaseId, request, List.of()));
     }
 
     private Long authenticatedUserId(HttpServletRequest request) {

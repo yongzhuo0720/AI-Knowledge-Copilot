@@ -45,7 +45,7 @@ class ConversationServiceTest {
         when(answerClient.answer(20L, "当前问题", List.of(previous)))
                 .thenReturn(new KnowledgeAnswer("回答内容", List.of(source)));
 
-        ConversationReply reply = new ConversationService(repository, knowledgeService, answerClient)
+        ConversationReply reply = new ConversationService(repository, knowledgeService, answerClient, mock(KnowledgeAgentClient.class))
                 .ask(3L, 20L, 7L, new CreateMessageRequest("当前问题"));
 
         assertThat(reply.userMessage().role()).isEqualTo("USER");
@@ -70,7 +70,7 @@ class ConversationServiceTest {
         });
         when(answerClient.answer(20L, "当前问题", List.of())).thenReturn(new KnowledgeAnswer("回答", List.of()));
 
-        new ConversationService(repository, knowledgeService, answerClient)
+        new ConversationService(repository, knowledgeService, answerClient, mock(KnowledgeAgentClient.class))
                 .ask(3L, 20L, 7L, new CreateMessageRequest("当前问题"));
 
         // 这条断言守的是「成本不会随会话长度无界增长」：
@@ -88,7 +88,7 @@ class ConversationServiceTest {
         when(repository.findSession(7L, 20L, 99L)).thenReturn(java.util.Optional.empty());
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                        new ConversationService(repository, knowledgeService, mock(KnowledgeAnswerClient.class))
+                        new ConversationService(repository, knowledgeService, mock(KnowledgeAnswerClient.class), mock(KnowledgeAgentClient.class))
                                 .findMessages(99L, 20L, 7L, new com.aicopilot.common.api.PageQuery(0, 20)))
                 .isInstanceOf(com.aicopilot.common.exception.AccessDeniedException.class)
                 .hasMessage("user cannot access this conversation");
@@ -103,7 +103,7 @@ class ConversationServiceTest {
         ConversationSession renamed = new ConversationSession(7L, 20L, 3L, "研发规范问答", Instant.now(), Instant.now());
         when(repository.findSession(7L, 20L, 3L)).thenReturn(java.util.Optional.of(session), java.util.Optional.of(renamed));
 
-        ConversationSession result = new ConversationService(repository, knowledgeService, mock(KnowledgeAnswerClient.class))
+        ConversationSession result = new ConversationService(repository, knowledgeService, mock(KnowledgeAnswerClient.class), mock(KnowledgeAgentClient.class))
                 .renameSession(3L, 20L, 7L, new RenameConversationRequest(" 研发规范问答 "));
 
         assertThat(result.title()).isEqualTo("研发规范问答");
@@ -118,7 +118,7 @@ class ConversationServiceTest {
                 new ConversationSession(7L, 20L, 3L, "产品问答", Instant.now(), Instant.now())
         ));
 
-        ConversationService service = new ConversationService(repository, knowledgeService, mock(KnowledgeAnswerClient.class));
+        ConversationService service = new ConversationService(repository, knowledgeService, mock(KnowledgeAnswerClient.class), mock(KnowledgeAgentClient.class));
         service.deleteSession(3L, 20L, 7L);
 
         verify(repository).deleteSession(7L);
@@ -164,7 +164,7 @@ class ConversationServiceTest {
         when(repository.countSessions(20L, 3L, "发布")).thenReturn(17L);
 
         PageResponse<ConversationSession> result = new ConversationService(
-                repository, knowledgeService, mock(KnowledgeAnswerClient.class)
+                repository, knowledgeService, mock(KnowledgeAnswerClient.class), mock(KnowledgeAgentClient.class)
         ).findSessions(3L, 20L, "发布", new PageQuery(2, 5));
 
         assertThat(result.items()).containsExactly(session);
@@ -188,7 +188,7 @@ class ConversationServiceTest {
         when(repository.countMessages(7L)).thenReturn(137L);
 
         PageResponse<ConversationMessage> firstPage = new ConversationService(
-                repository, knowledgeService, mock(KnowledgeAnswerClient.class)
+                repository, knowledgeService, mock(KnowledgeAnswerClient.class), mock(KnowledgeAgentClient.class)
         ).findMessages(3L, 20L, 7L, PageQuery.of(0, 20));
 
         assertThat(firstPage.items()).containsExactly(message);
@@ -209,7 +209,7 @@ class ConversationServiceTest {
         when(repository.countMessages(7L)).thenReturn(21L);
 
         PageResponse<ConversationMessage> lastPage = new ConversationService(
-                repository, knowledgeService, mock(KnowledgeAnswerClient.class)
+                repository, knowledgeService, mock(KnowledgeAnswerClient.class), mock(KnowledgeAgentClient.class)
         ).findMessages(3L, 20L, 7L, PageQuery.of(1, 20));
 
         assertThat(lastPage.hasNext()).isFalse();
@@ -225,7 +225,7 @@ class ConversationServiceTest {
         when(repository.findMessages(eq(7L), anyInt(), anyLong())).thenReturn(List.of());
         when(repository.countMessages(7L)).thenReturn(0L);
 
-        new ConversationService(repository, knowledgeService, mock(KnowledgeAnswerClient.class))
+        new ConversationService(repository, knowledgeService, mock(KnowledgeAnswerClient.class), mock(KnowledgeAgentClient.class))
                 .findMessages(3L, 20L, 7L, PageQuery.of(-3, 1_000_000));
 
         // `?size=1000000` 不能真的变成「一次捞一百万条」

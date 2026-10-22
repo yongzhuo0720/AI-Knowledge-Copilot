@@ -61,10 +61,11 @@ class KnowledgeServiceTest {
         when(processingClient.submit(any(DocumentProcessingRequest.class)))
                 .thenReturn(new DocumentProcessingResponse("task-1", "", "ACCEPTED"));
         KnowledgeService service = new KnowledgeService(repository, processingClient, storageService,
-                mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class));
+                mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class),
+                authorize(repository, 20L, 10L, 7L));
         ByteArrayInputStream inputStream = new ByteArrayInputStream(new byte[] {1});
 
-        KnowledgeDocumentResponse response = service.uploadDocument(20L, filename, "text/plain", 1L, inputStream);
+        KnowledgeDocumentResponse response = service.uploadDocument(7L, 20L, filename, "text/plain", 1L, inputStream);
 
         assertThat(response.originalFilename()).isEqualTo("guide.txt");
         verify(storageService).upload(argThat(key -> key.startsWith("kb/20/") && key.endsWith("/guide.txt")),
@@ -86,10 +87,11 @@ class KnowledgeServiceTest {
         when(processingClient.submit(any(DocumentProcessingRequest.class)))
                 .thenReturn(new DocumentProcessingResponse("task-1", "", "ACCEPTED"));
         KnowledgeService service = new KnowledgeService(repository, processingClient, storageService,
-                mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class));
+                mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class),
+                authorize(repository, 20L, 10L, 7L));
 
         KnowledgeDocumentResponse response = service.uploadDocument(
-                20L, filename, "application/octet-stream", 1L, new ByteArrayInputStream(new byte[] {1}));
+                7L, 20L, filename, "application/octet-stream", 1L, new ByteArrayInputStream(new byte[] {1}));
 
         assertThat(response.originalFilename()).isEqualTo(filename);
         verify(storageService).upload(argThat(key -> key.startsWith("kb/20/") && key.endsWith("/" + filename)),
@@ -102,10 +104,11 @@ class KnowledgeServiceTest {
         DocumentProcessingClient processingClient = mock(DocumentProcessingClient.class);
         ObjectStorageService storageService = mock(ObjectStorageService.class);
         KnowledgeService service = new KnowledgeService(repository, processingClient, storageService,
-                mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class));
+                mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class),
+                authorize(repository, 20L, 10L, 7L));
 
         assertThatThrownBy(() -> service.uploadDocument(
-                20L, "malware.exe", "application/octet-stream", 1L, new ByteArrayInputStream(new byte[] {1})))
+                7L, 20L, "malware.exe", "application/octet-stream", 1L, new ByteArrayInputStream(new byte[] {1})))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getCode()).isEqualTo("UNSUPPORTED_FILE_TYPE"));
 
@@ -119,8 +122,8 @@ class KnowledgeServiceTest {
         KnowledgeBase saved = new KnowledgeBase(20L, 10L, "研发资料", "架构文档", "ACTIVE");
         when(repository.saveKnowledgeBase(any(KnowledgeBase.class))).thenReturn(saved);
 
-        KnowledgeBaseResponse response = new KnowledgeService(repository, mock(DocumentProcessingClient.class), mock(ObjectStorageService.class), mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class))
-                .createKnowledgeBase(new CreateKnowledgeBaseRequest(10L, " 研发资料 ", " 架构文档 "));
+        KnowledgeBaseResponse response = new KnowledgeService(repository, mock(DocumentProcessingClient.class), mock(ObjectStorageService.class), mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class), authorize(repository, 10L, 10L, 7L))
+                .createKnowledgeBase(7L, new CreateKnowledgeBaseRequest(10L, " 研发资料 ", " 架构文档 "));
 
         assertThat(response).isEqualTo(new KnowledgeBaseResponse(20L, 10L, "研发资料", "架构文档", "ACTIVE"));
         verify(repository).saveKnowledgeBase(new KnowledgeBase( null, 10L, "研发资料", "架构文档", "ACTIVE"));
@@ -138,8 +141,8 @@ class KnowledgeServiceTest {
         when(processingClient.submit(any(DocumentProcessingRequest.class)))
                 .thenReturn(new DocumentProcessingResponse("task-1", "kb/20/guide.pdf", "ACCEPTED"));
 
-        KnowledgeDocumentResponse response = new KnowledgeService(repository, processingClient, storageService, mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class))
-                .registerDocument(20L, new RegisterDocumentRequest(
+        KnowledgeDocumentResponse response = new KnowledgeService(repository, processingClient, storageService, mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class), authorize(repository, 20L, 10L, 7L))
+                .registerDocument(7L, 20L, new RegisterDocumentRequest(
                         " guide.pdf ", " kb/20/guide.pdf ", " application/pdf ", 2048L
                 ));
 
@@ -162,8 +165,8 @@ class KnowledgeServiceTest {
                 new KnowledgeDocument(30L, 20L, "guide.pdf", "kb/20/guide.pdf", "application/pdf", 2048L, "UPLOADED", "task-1", createdAt)
         ));
 
-        List<KnowledgeDocumentResponse> response = new KnowledgeService(repository, mock(DocumentProcessingClient.class), mock(ObjectStorageService.class), mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class))
-                .findDocuments(20L);
+        List<KnowledgeDocumentResponse> response = new KnowledgeService(repository, mock(DocumentProcessingClient.class), mock(ObjectStorageService.class), mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class), authorize(repository, 20L, 10L, 7L))
+                .findDocuments(7L, 20L);
 
         assertThat(response).containsExactly(new KnowledgeDocumentResponse(
                 30L, 20L, "guide.pdf", "kb/20/guide.pdf", "application/pdf", 2048L, "UPLOADED", "task-1", createdAt
@@ -182,8 +185,8 @@ class KnowledgeServiceTest {
         when(processingClient.findTask("task-1"))
                 .thenReturn(new DocumentProcessingResponse("task-1", "kb/20/guide.pdf", "PROCESSING"));
 
-        KnowledgeDocumentResponse response = new KnowledgeService(repository, processingClient, mock(ObjectStorageService.class), mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class))
-                .refreshDocumentProcessingStatus(20L, 30L);
+        KnowledgeDocumentResponse response = new KnowledgeService(repository, processingClient, mock(ObjectStorageService.class), mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class), authorize(repository, 20L, 10L, 7L))
+                .refreshDocumentProcessingStatus(7L, 20L, 30L);
 
         assertThat(response.status()).isEqualTo("PROCESSING");
         verify(repository).updateProcessingStatus(30L, "task-1", "PROCESSING");
@@ -201,8 +204,8 @@ class KnowledgeServiceTest {
         when(processingClient.submit(any(DocumentProcessingRequest.class)))
                 .thenReturn(new DocumentProcessingResponse("task-2", "kb/20/guide.pdf", "ACCEPTED"));
 
-        KnowledgeDocumentResponse response = new KnowledgeService(repository, processingClient, mock(ObjectStorageService.class), mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class))
-                .reparseDocument(20L, 30L);
+        KnowledgeDocumentResponse response = new KnowledgeService(repository, processingClient, mock(ObjectStorageService.class), mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class), authorize(repository, 20L, 10L, 7L))
+                .reparseDocument(7L, 20L, 30L);
 
         assertThat(response.status()).isEqualTo("ACCEPTED");
         verify(processingClient).submit(new DocumentProcessingRequest(
@@ -223,8 +226,8 @@ class KnowledgeServiceTest {
         when(processingClient.retry("task-1"))
                 .thenReturn(new DocumentProcessingResponse("task-1", "kb/20/guide.pdf", "ACCEPTED", "", 0));
 
-        KnowledgeDocumentResponse response = new KnowledgeService(repository, processingClient, mock(ObjectStorageService.class), mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class))
-                .retryDocumentProcessing(20L, 30L);
+        KnowledgeDocumentResponse response = new KnowledgeService(repository, processingClient, mock(ObjectStorageService.class), mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class), authorize(repository, 20L, 10L, 7L))
+                .retryDocumentProcessing(7L, 20L, 30L);
 
         assertThat(response.status()).isEqualTo("ACCEPTED");
         verify(processingClient).retry("task-1");
@@ -297,5 +300,15 @@ class KnowledgeServiceTest {
                 .isInstanceOf(com.aicopilot.common.exception.AccessDeniedException.class);
         org.mockito.Mockito.verify(repository, org.mockito.Mockito.never())
                 .findDocumentsForWorkspace(10L, null, null, null);
+    }
+
+    /** 打通授权链的桩：knowledgeBaseId 挂在 workspaceId 下，且 userId 是成员。 */
+    private static WorkspaceRepository authorize(KnowledgeRepository repository, long knowledgeBaseId,
+                                                 long workspaceId, long userId) {
+        WorkspaceRepository workspaceRepository = mock(WorkspaceRepository.class);
+        when(repository.findKnowledgeBase(knowledgeBaseId)).thenReturn(Optional.of(
+                new KnowledgeBase(knowledgeBaseId, workspaceId, "资料", null, "ACTIVE")));
+        when(workspaceRepository.isMember(workspaceId, userId)).thenReturn(true);
+        return workspaceRepository;
     }
 }
