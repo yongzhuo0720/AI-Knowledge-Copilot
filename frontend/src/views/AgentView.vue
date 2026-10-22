@@ -1,34 +1,57 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import {
   askConversationAgent,
   createConversation,
   listConversationMessages,
-  listConversations,
   MAX_PAGE_SIZE,
   type KnowledgeAgentAnswer,
   type ConversationMessage,
   type ConversationSession,
 } from '@/services/api'
 import { looksLikeMarkdown, renderMarkdown } from '@/services/markdown'
-import { resultUnit } from '@/services/agentTrace'
+import { resultUnit, toAgentAnswer } from '@/services/agentTrace'
 import { SPARK_ICON } from '@/services/icons'
+import { isSendHotkey } from '@/services/input'
+import { useChatSessions } from '@/composables/useChatSessions'
 import { useWorkspaceContext } from '@/composables/useWorkspaceContext'
 
 const { currentUser, workspaces, workspaceId, knowledgeBases, loadContext, switchWorkspace, onContextChange } = useWorkspaceContext()
 
 const knowledgeBaseId = ref('')
-const sessions = ref<ConversationSession[]>([])
-const sessionId = ref<number | null>(null)
+
+// Agent 页只是「选一个会话来复看执行轨迹」，会话列表与 Chat 页共用同一套
+// 组合式函数，取最大的一页（100 条），不在侧栏里翻页。
+const {
+  sessions,
+  sessionId,
+  hasMoreSessions,
+  selectSession,
+  loadSessions,
+  refreshFirstPage,
+  reset: resetSessions,
+} = useChatSessions({
+  knowledgeBaseId,
+  pageSize: MAX_PAGE_SIZE,
+  onSessionSelected: loadSessionMessages,
+  createSession: newSession,
+})
+
 const messages = ref<ConversationMessage[]>([])
 const question = ref('')
 const result = ref<KnowledgeAgentAnswer | null>(null)
 const loading = ref(false)
 const message = ref('')
 // 连续切换会话 / 知识库时，先发出的请求可能后返回；用序号丢弃过期响应。
-let sessionRequestId = 0
+let messageRequestId = 0
 let agentRunRequestId = 0
+
+// Agent 页不翻页，「列表被 100 条截断」就是 hasMoreSessions 变成 true 的那一刻；
+// 执行完一次任务后 refreshFirstPage 也会改写它，挂在 watch 上两处都能覆盖到提示。
+watch(hasMoreSessions, (truncated) => {
+  if (truncated) message.value = `会话较多，这里只列出最近 ${MAX_PAGE_SIZE} 个，请到 AI 会话页搜索更早的会话。`
+})
 
 const activeKnowledgeBase = computed(() => knowledgeBases.value.find((item) => item.id === Number(knowledgeBaseId.value)))
 
@@ -36,60 +59,48 @@ const activeKnowledgeBase = computed(() => knowledgeBases.value.find((item) => i
 onContextChange(({ workspaceChanged }) => {
   if (workspaceChanged) {
     knowledgeBaseId.value = ''
-    sessionId.value = null
-    messages.value = []
-    result.value = null
+    resetConversationState()
   }
   if (!currentUser.value || !workspaceId.value) return
   if (!knowledgeBases.value.some((item) => String(item.id) === knowledgeBaseId.value)) {
     knowledgeBaseId.value = knowledgeBases.value.length ? String(knowledgeBases.value[0].id) : ''
   }
-  void loadSessions().catch((error) => { message.value = error instanceof Error ? error.message : 'Agent 加载失败' })
+  void reloadSessions().catch((error) => { message.value = error instanceof Error ? error.message : 'Agent 加载失败' })
 })
 
-async function loadSessions() {
-  if (!currentUser.value || !knowledgeBaseId.value) {
-    // 切走时让在途的会话加载和 Agent 执行全部失效。
-    sessionRequestId += 1
-    agentRunRequestId += 1
-    sessions.value = []
-    sessionId.value = null
-    messages.value = []
-    result.value = null
-    return
-  }
-  // Agent 页只是「选一个会话来复看执行轨迹」，不需要在侧栏里翻页，
-  // 所以直接要最大的一页（100 条）。但不能假装分页不存在：
-  // 一旦超过一页，就把话说明白，而不是让用户以为会话丢了。
-  const response = await listConversations(Number(knowledgeBaseId.value), '', 0, MAX_PAGE_SIZE)
-  sessions.value = response.data.items
-  if (response.data.hasNext) {
-    message.value = `会话较多，这里只列出最近 ${MAX_PAGE_SIZE} 个，请到 AI 会话页搜索更早的会话。`
-  }
-  const selected = sessions.value.find((item) => item.id === sessionId.value) ?? sessions.value[0]
-  if (selected) await selectSession(selected)
-  else await newSession()
+/** 清空会话与结果面板，并让在途的消息加载失效。 */
+function resetConversationState() {
+  messageRequestId += 1
+  resetSessions()
+  messages.value = []
+  result.value = null
 }
 
-async function selectSession(session: ConversationSession) {
+/** 重新加载会话列表；上下文不完整时只清空，并把在途的 Agent 执行一并作废。 */
+async function reloadSessions() {
+  if (!currentUser.value || !knowledgeBaseId.value) {
+    // 切走时让在途的会话加载和 Agent 执行全部失效。
+    agentRunRequestId += 1
+    resetConversationState()
+    return
+  }
+  await loadSessions()
+}
+
+async function loadSessionMessages(session: ConversationSession) {
   if (!knowledgeBaseId.value) return
-  sessionId.value = session.id
-  const requestId = ++sessionRequestId
+  const requestId = ++messageRequestId
   // 消息同理：page=0 就是最近的一批，取满一页够看执行轨迹了。
   try {
     const response = await listConversationMessages(
       Number(knowledgeBaseId.value), session.id, 0, MAX_PAGE_SIZE,
     )
-    if (requestId !== sessionRequestId || sessionId.value !== session.id) return
+    if (requestId !== messageRequestId || sessionId.value !== session.id) return
     messages.value = response.data.items
     const latestAssistant = [...messages.value].reverse().find((item) => item.role === 'ASSISTANT')
-    result.value = latestAssistant ? {
-      answer: latestAssistant.content,
-      sources: latestAssistant.sources,
-      steps: latestAssistant.agentSteps ?? [],
-    } : null
+    result.value = latestAssistant ? toAgentAnswer(latestAssistant) : null
   } catch (error) {
-    if (requestId === sessionRequestId) message.value = error instanceof Error ? error.message : '加载会话失败'
+    if (requestId === messageRequestId) message.value = error instanceof Error ? error.message : '加载会话失败'
   }
 }
 
@@ -115,12 +126,8 @@ async function runAgent() {
     // 执行期间切了知识库或会话：这次结果属于上一屏，写进来会串台。
     if (requestId !== agentRunRequestId || Number(knowledgeBaseId.value) !== fromBaseId || sessionId.value !== fromSessionId) return
     messages.value = [...messages.value, response.data.userMessage, response.data.assistantMessage]
-    result.value = {
-      answer: response.data.assistantMessage.content,
-      sources: response.data.assistantMessage.sources,
-      steps: response.data.assistantMessage.agentSteps ?? [],
-    }
-    await refreshSessionList(fromBaseId)
+    result.value = toAgentAnswer(response.data.assistantMessage)
+    await refreshFirstPage()
   } catch (error) {
     if (requestId === agentRunRequestId) message.value = error instanceof Error ? error.message : 'Agent 执行失败'
   } finally {
@@ -128,22 +135,8 @@ async function runAgent() {
   }
 }
 
-/** 只刷新会话标题/排序，不重新选中会话，避免执行完一次任务就把列表重置。 */
-async function refreshSessionList(forBaseId: number) {
-  try {
-    const response = await listConversations(forBaseId, '', 0, MAX_PAGE_SIZE)
-    if (Number(knowledgeBaseId.value) !== forBaseId) return
-    sessions.value = response.data.items
-    if (response.data.hasNext) message.value = `会话较多，这里只列出最近 ${MAX_PAGE_SIZE} 个，请到 AI 会话页搜索更早的会话。`
-  } catch {
-    // 列表刷新失败不影响本次执行结果。
-  }
-}
-
-/** 输入法选词时的回车不能当作发送。 */
 function handleQuestionKeydown(event: KeyboardEvent) {
-  if (event.key !== 'Enter' || event.shiftKey) return
-  if (event.isComposing || event.keyCode === 229) return
+  if (!isSendHotkey(event)) return
   event.preventDefault()
   void runAgent()
 }
@@ -159,7 +152,7 @@ onMounted(async () => {
 <template>
   <main class="agent-shell">
     <header class="agent-header"><div><p class="eyebrow">知识库 Agent</p><h1>让 Agent 先检索，再回答</h1><p class="agent-summary">这是一个真实可解释的 Tool Calling 闭环：模型决定调用工具，工具只访问当前知识库，最后返回带引用的答案。</p></div><span class="agent-badge"><span class="status-dot online" />受权限保护</span></header>
-    <section class="agent-toolbar panel"><label>工作空间<select :value="workspaceId" :disabled="loading" @change="switchWorkspace(($event.target as HTMLSelectElement).value)"><option v-for="workspace in workspaces" :key="workspace.id" :value="String(workspace.id)">{{ workspace.name }}</option></select></label><label>知识库<select v-model="knowledgeBaseId" :disabled="loading || !knowledgeBases.length" @change="loadSessions"><option value="" disabled>{{ knowledgeBases.length ? '选择知识库' : '暂无知识库' }}</option><option v-for="item in knowledgeBases" :key="item.id" :value="String(item.id)">{{ item.name }}</option></select></label><label>会话<select v-model="sessionId" :disabled="loading || !sessions.length" @change="selectSession(sessions.find((item) => item.id === sessionId)!)"><option v-for="item in sessions" :key="item.id" :value="item.id">{{ item.title }}</option></select></label><label class="agent-question">任务 / 问题<input v-model="question" maxlength="1000" placeholder="例如：总结这套资料中的发布流程" @keydown="handleQuestionKeydown" /></label><button class="primary-button" :disabled="loading || !knowledgeBaseId || !question.trim()" type="button" @click="runAgent">{{ loading ? '执行中…' : '运行 Agent' }} <span>→</span></button></section>
+    <section class="agent-toolbar panel"><label>工作空间<select :value="workspaceId" :disabled="loading" @change="switchWorkspace(($event.target as HTMLSelectElement).value)"><option v-for="workspace in workspaces" :key="workspace.id" :value="String(workspace.id)">{{ workspace.name }}</option></select></label><label>知识库<select v-model="knowledgeBaseId" :disabled="loading || !knowledgeBases.length" @change="reloadSessions"><option value="" disabled>{{ knowledgeBases.length ? '选择知识库' : '暂无知识库' }}</option><option v-for="item in knowledgeBases" :key="item.id" :value="String(item.id)">{{ item.name }}</option></select></label><label>会话<select v-model="sessionId" :disabled="loading || !sessions.length" @change="selectSession(sessions.find((item) => item.id === sessionId)!)"><option v-for="item in sessions" :key="item.id" :value="item.id">{{ item.title }}</option></select></label><label class="agent-question">任务 / 问题<input v-model="question" maxlength="1000" placeholder="例如：总结这套资料中的发布流程" @keydown="handleQuestionKeydown" /></label><button class="primary-button" :disabled="loading || !knowledgeBaseId || !question.trim()" type="button" @click="runAgent">{{ loading ? '执行中…' : '运行 Agent' }} <span>→</span></button></section>
     <p v-if="message" class="message agent-message">{{ message }}</p>
     <section class="agent-flow"><article class="agent-flow-step panel"><span>01</span><strong>规划</strong><small>理解问题并决定是否检索</small></article><span class="agent-flow-arrow">→</span><article class="agent-flow-step panel"><span>02</span><strong>工具调用</strong><small>调用 knowledge_search 等工具</small></article><span class="agent-flow-arrow">→</span><article class="agent-flow-step panel"><span>03</span><strong>生成回答</strong><small>基于来源生成回答</small></article></section>
     <section v-if="!result" class="agent-empty panel"><span class="answer-icon" v-html="SPARK_ICON" /><strong>准备执行一个知识任务</strong><span>{{ activeKnowledgeBase ? `当前知识库：${activeKnowledgeBase.name}` : '先选择一个知识库' }}</span></section>

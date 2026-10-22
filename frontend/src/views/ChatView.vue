@@ -5,7 +5,6 @@ import {
   createConversation,
   deleteConversation,
   listConversationMessages,
-  listConversations,
   renameConversation,
   streamConversation,
   type ConversationMessage,
@@ -15,6 +14,8 @@ import {
 import { looksLikeMarkdown, renderMarkdown } from '@/services/markdown'
 import { retrieverLabel } from '@/services/labels'
 import { SPARK_ICON } from '@/services/icons'
+import { isSendHotkey } from '@/services/input'
+import { useChatSessions } from '@/composables/useChatSessions'
 import { useWorkspaceContext } from '@/composables/useWorkspaceContext'
 
 const { currentUser, workspaces, workspaceId, knowledgeBases, loadContext, switchWorkspace, onContextChange } = useWorkspaceContext()
@@ -26,12 +27,37 @@ const { currentUser, workspaces, workspaceId, knowledgeBases, loadContext, switc
 const SESSION_PAGE_SIZE = 20
 const MESSAGE_PAGE_SIZE = 30
 
-const sessions = ref<ConversationSession[]>([])
+const knowledgeBaseId = ref('')
+const sessionSearch = ref('')
+
+// 会话列表的加载 / 翻页 / 选中由 useChatSessions 维护（与 Agent 页共用一份实现），
+// 本页只负责会话内的消息流与流式输出。
+const {
+  sessions,
+  sessionId,
+  hasMoreSessions,
+  loadingMoreSessions,
+  selectSession,
+  loadSessions,
+  loadMoreSessions,
+  refreshFirstPage,
+  reset: resetSessions,
+  invalidate: invalidateSessionLoads,
+} = useChatSessions({
+  knowledgeBaseId,
+  searchQuery: sessionSearch,
+  pageSize: SESSION_PAGE_SIZE,
+  onSessionSelected: loadSessionMessages,
+  onNoSession: () => {
+    messageRequestId += 1
+    messages.value = []
+    sources.value = []
+  },
+  createSession: newSession,
+})
+
 const messages = ref<ConversationMessage[]>([])
 const sources = ref<KnowledgeRetrievalChunk[]>([])
-const knowledgeBaseId = ref('')
-const sessionId = ref<number | null>(null)
-const sessionSearch = ref('')
 const question = ref('')
 const streamingText = ref('')
 const lastQuestion = ref('')
@@ -41,11 +67,8 @@ const message = ref('')
 const editingSessionId = ref<number | null>(null)
 const editingTitle = ref('')
 const sessionActionLoading = ref(false)
-// 分页状态。`page` 记的是「当前已经加载到第几页」，不是「下一页」——
-// 这样「是否还有下一页」只由 hasMoreXxx 一个来源决定，不会出现两个变量打架。
-const sessionPage = ref(0)
-const hasMoreSessions = ref(false)
-const loadingMoreSessions = ref(false)
+// 消息分页。`messagePage` 记的是「当前已经加载到第几页」，不是「下一页」——
+// 这样「是否还有下一页」只由 hasMoreMessages 一个来源决定，不会出现两个变量打架。
 const messagePage = ref(0)
 const hasMoreMessages = ref(false)
 const loadingEarlierMessages = ref(false)
@@ -53,7 +76,6 @@ const creatingSession = ref(false)
 let streamController: AbortController | null = null
 // 请求序号：连续切换知识库 / 会话时，先发出的请求可能后返回。
 // 每次发起新请求就 +1，响应回来时序号已变则丢弃，避免过期数据覆盖当前界面。
-let sessionListRequestId = 0
 let messageRequestId = 0
 
 const activeKnowledgeBase = () => knowledgeBases.value.find((item) => item.id === Number(knowledgeBaseId.value))
@@ -77,43 +99,14 @@ onContextChange(({ workspaceChanged }) => {
   void loadSessions().catch((error) => { message.value = error instanceof Error ? error.message : 'Chat 加载失败' })
 })
 
-async function loadSessions(createIfEmpty = true) {
-  const requestId = ++sessionListRequestId
-  if (!knowledgeBaseId.value) {
-    resetConversationState()
-    return
-  }
-  // 换知识库 / 改搜索词都相当于「重新开一页」，页码必须归零 ——
-  // 否则会把上一次的第 3 页条件带进新列表，直接翻出一片空白。
-  sessionPage.value = 0
-  const response = await listConversations(Number(knowledgeBaseId.value), sessionSearch.value, 0, SESSION_PAGE_SIZE)
-  // 请求期间用户又切了知识库或改了搜索词：这份响应属于上一屏，直接丢弃。
-  if (requestId !== sessionListRequestId) return
-  sessions.value = response.data.items
-  hasMoreSessions.value = response.data.hasNext
-  const selected = sessions.value.find((item) => item.id === sessionId.value) ?? sessions.value[0]
-  if (selected) await selectSession(selected)
-  else if (createIfEmpty) await newSession()
-  else {
-    sessionId.value = null
-    messages.value = []
-    sources.value = []
-    messageRequestId += 1
-  }
-}
-
 /** 清空与「当前会话」有关的全部状态，并让所有在途请求失效。切换工作空间时用。 */
 function resetConversationState() {
-  sessionListRequestId += 1
+  resetSessions()
   messageRequestId += 1
-  sessions.value = []
-  sessionId.value = null
   messages.value = []
   sources.value = []
   streamingText.value = ''
-  sessionPage.value = 0
   messagePage.value = 0
-  hasMoreSessions.value = false
   hasMoreMessages.value = false
 }
 
@@ -123,33 +116,12 @@ function abortStream() {
   streamController?.abort()
 }
 
-async function loadMoreSessions() {
-  if (!knowledgeBaseId.value || !hasMoreSessions.value || loadingMoreSessions.value) return
-  loadingMoreSessions.value = true
-  const requestId = sessionListRequestId
+async function loadMore() {
   try {
-    const nextPage = sessionPage.value + 1
-    const response = await listConversations(
-      Number(knowledgeBaseId.value), sessionSearch.value, nextPage, SESSION_PAGE_SIZE,
-    )
-    // 翻页期间换了知识库 / 搜索词：这一页属于上一份列表，不能拼进新列表。
-    if (requestId !== sessionListRequestId) return
-    // 按 id 去重：会话是按「最近更新」排序的，翻页期间只要有人发了条消息，
-    // 它就会从第 2 页跳到第 1 页，于是两页里都有它 —— 不去重界面上会出现两个一模一样的会话。
-    const known = new Set(sessions.value.map((item) => item.id))
-    sessions.value = [...sessions.value, ...response.data.items.filter((item) => !known.has(item.id))]
-    sessionPage.value = nextPage
-    hasMoreSessions.value = response.data.hasNext
+    await loadMoreSessions()
   } catch (error) {
     message.value = error instanceof Error ? error.message : '加载更多会话失败'
-  } finally {
-    loadingMoreSessions.value = false
   }
-}
-
-async function searchSessions() {
-  if (!knowledgeBaseId.value) return
-  await loadSessions(false)
 }
 
 async function selectKnowledgeBase() {
@@ -163,12 +135,12 @@ async function selectKnowledgeBase() {
   }
 }
 
-async function selectSession(session: ConversationSession) {
+/** 会话被选中（useChatSessions 已记下 sessionId）之后，本页负责加载它的消息流。 */
+async function loadSessionMessages(session: ConversationSession) {
   if (!knowledgeBaseId.value) return
   // 切换会话前停掉上一个会话可能还在进行的生成流；
   // send() 的 fromSessionId 守卫负责丢弃 abort 之后仍迟到的缓冲事件。
   abortStream()
-  sessionId.value = session.id
   messagePage.value = 0
   messages.value = []
   sources.value = []
@@ -308,7 +280,7 @@ async function send() {
       }
       if (event.event === 'error') message.value = event.data.message
     })
-    await refreshSessionListAfterSend()
+    await refreshFirstPage()
   } catch (error) {
     // 已经被更新的请求接管（例如停止后立刻重新提问）：旧流的事件和收尾都不该再碰状态。
     if (streamController !== controller) return
@@ -325,29 +297,6 @@ async function send() {
       streamController = null
       streamingText.value = ''
     }
-  }
-}
-
-/**
- * 发送完成后只刷新会话列表的第一页。
- *
- * 不能直接复用 loadSessions()：它会重置页码、重新选中会话，甚至在没有会话时新建一个 ——
- * 对「刚发完一条消息」来说这些都太重，还会把用户翻出来的历史列表收缩回一页。
- */
-async function refreshSessionListAfterSend() {
-  if (!knowledgeBaseId.value) return
-  const requestId = sessionListRequestId
-  try {
-    const response = await listConversations(
-      Number(knowledgeBaseId.value), sessionSearch.value, 0, SESSION_PAGE_SIZE,
-    )
-    if (requestId !== sessionListRequestId) return
-    const firstPageIds = new Set(response.data.items.map((item) => item.id))
-    // 第一页之外的旧会话保留在列表里，避免发一条消息就把已加载的历史冲掉。
-    sessions.value = [...response.data.items, ...sessions.value.filter((item) => !firstPageIds.has(item.id))]
-    if (sessionPage.value === 0) hasMoreSessions.value = response.data.hasNext
-  } catch {
-    // 列表刷新只是锦上添花，失败不能把已经成功的回答报成失败。
   }
 }
 
@@ -383,10 +332,8 @@ async function copyAnswer(content: string) {
   }
 }
 
-/** 输入法选词时的回车不能当作发送：否则每输入一个中文词就可能把半句话发出去。 */
 function handleComposerKeydown(event: KeyboardEvent) {
-  if (event.key !== 'Enter' || event.shiftKey) return
-  if (event.isComposing || event.keyCode === 229) return
+  if (!isSendHotkey(event)) return
   event.preventDefault()
   void send()
 }
@@ -400,7 +347,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   abortStream()
-  sessionListRequestId += 1
+  invalidateSessionLoads()
   messageRequestId += 1
 })
 </script>
@@ -410,7 +357,7 @@ onBeforeUnmount(() => {
     <header class="chat-header"><div><p class="eyebrow">AI 会话</p><h1>和你的知识库对话</h1><p>回答实时生成，并保留每个来源片段。</p></div><div class="chat-context"><label>工作空间<select :value="workspaceId" @change="switchWorkspace(($event.target as HTMLSelectElement).value)"><option v-for="workspace in workspaces" :key="workspace.id" :value="String(workspace.id)">{{ workspace.name }}</option></select></label><label>知识库<select v-model="knowledgeBaseId" :disabled="!knowledgeBases.length" @change="selectKnowledgeBase"><option v-for="item in knowledgeBases" :key="item.id" :value="String(item.id)">{{ item.name }}</option></select></label></div></header>
     <section v-if="!activeKnowledgeBase()" class="chat-empty panel"><strong>先选择一个知识库</strong><span>创建知识库并上传文档后，AI 会话才能基于企业资料回答。</span></section>
     <section v-else class="chat-layout">
-      <aside class="chat-sessions panel"><div class="chat-panel-heading"><div><p class="eyebrow">会话列表</p><h2>会话</h2></div><button class="secondary-button" :disabled="streaming || sessionActionLoading || creatingSession" type="button" @click="newSession">新建</button></div><form class="chat-session-search" @submit.prevent="searchSessions"><input v-model="sessionSearch" maxlength="100" placeholder="搜索标题或消息" aria-label="搜索会话" /><button class="text-button" type="submit">搜索</button></form><div v-for="session in sessions" :key="session.id" class="chat-session-row"><button v-if="editingSessionId !== session.id" class="chat-session-item" :class="{ active: session.id === sessionId }" type="button" @click="selectSession(session)"><strong>{{ session.title }}</strong><small>{{ new Date(session.updatedAt).toLocaleDateString('zh-CN') }}</small></button><form v-else class="chat-session-edit" @submit.prevent="saveRename(session)"><input v-model="editingTitle" maxlength="200" aria-label="会话名称" /><button class="text-button" :disabled="sessionActionLoading" type="submit">保存</button><button class="text-button" :disabled="sessionActionLoading" type="button" @click="cancelRename">取消</button></form><div v-if="editingSessionId !== session.id" class="chat-session-actions"><button class="text-button" :disabled="streaming || sessionActionLoading" type="button" @click="startRename(session)">重命名</button><button class="text-button danger" :disabled="streaming || sessionActionLoading" type="button" @click="removeSession(session)">删除</button></div></div><button v-if="hasMoreSessions" class="text-button chat-load-more" :disabled="loadingMoreSessions" type="button" @click="loadMoreSessions">{{ loadingMoreSessions ? '加载中…' : '加载更多会话' }}</button></aside>
+      <aside class="chat-sessions panel"><div class="chat-panel-heading"><div><p class="eyebrow">会话列表</p><h2>会话</h2></div><button class="secondary-button" :disabled="streaming || sessionActionLoading || creatingSession" type="button" @click="newSession">新建</button></div><form class="chat-session-search" @submit.prevent="loadSessions(false)"><input v-model="sessionSearch" maxlength="100" placeholder="搜索标题或消息" aria-label="搜索会话" /><button class="text-button" type="submit">搜索</button></form><div v-for="session in sessions" :key="session.id" class="chat-session-row"><button v-if="editingSessionId !== session.id" class="chat-session-item" :class="{ active: session.id === sessionId }" type="button" @click="selectSession(session)"><strong>{{ session.title }}</strong><small>{{ new Date(session.updatedAt).toLocaleDateString('zh-CN') }}</small></button><form v-else class="chat-session-edit" @submit.prevent="saveRename(session)"><input v-model="editingTitle" maxlength="200" aria-label="会话名称" /><button class="text-button" :disabled="sessionActionLoading" type="submit">保存</button><button class="text-button" :disabled="sessionActionLoading" type="button" @click="cancelRename">取消</button></form><div v-if="editingSessionId !== session.id" class="chat-session-actions"><button class="text-button" :disabled="streaming || sessionActionLoading" type="button" @click="startRename(session)">重命名</button><button class="text-button danger" :disabled="streaming || sessionActionLoading" type="button" @click="removeSession(session)">删除</button></div></div><button v-if="hasMoreSessions" class="text-button chat-load-more" :disabled="loadingMoreSessions" type="button" @click="loadMore">{{ loadingMoreSessions ? '加载中…' : '加载更多会话' }}</button></aside>
       <section class="chat-main panel"><div class="chat-main-heading"><div><span class="status-dot online" />{{ activeKnowledgeBase()?.name }}</div><span v-if="streaming" class="streaming-label">正在生成…</span></div><div class="chat-messages"><button v-if="hasMoreMessages" class="text-button chat-load-more" :disabled="loadingEarlierMessages" type="button" @click="loadEarlierMessages">{{ loadingEarlierMessages ? '加载中…' : '↑ 加载更早的消息' }}</button><div v-if="!messages.length && !streamingText" class="chat-welcome"><span class="answer-icon" v-html="SPARK_ICON" /><strong>从一个问题开始</strong><span>试试询问文档中的流程、规则或关键结论。</span></div><article v-for="item in messages" :key="item.id" class="chat-bubble" :class="item.role.toLowerCase()"><small>{{ item.role === 'USER' ? '你' : 'AI Copilot' }}</small><p v-if="item.role === 'USER'">{{ item.content }}</p><template v-else><div v-if="looksLikeMarkdown(item.content)" class="markdown-body" v-html="renderMarkdown(item.content)" /><p v-else>{{ item.content }}</p></template><div v-if="item.role === 'ASSISTANT'" class="bubble-actions"><button class="text-button" type="button" @click="copyAnswer(item.content)">复制</button><button v-if="item.id === messages[messages.length - 1]?.id" class="text-button" type="button" @click="regenerate">重新生成</button></div></article><article v-if="streamingText" class="chat-bubble assistant streaming-bubble"><small>AI Copilot · 实时生成</small><div v-if="looksLikeMarkdown(streamingText)" class="markdown-body" v-html="renderMarkdown(streamingText)" /><p v-else>{{ streamingText }}</p><span class="typing-cursor" /></article></div><p v-if="message" class="message chat-message">{{ message }}</p><form class="chat-composer" @submit.prevent="send"><textarea v-model="question" :disabled="streaming" rows="2" maxlength="1000" placeholder="询问你的知识库…" @keydown="handleComposerKeydown" /><button v-if="streaming" class="secondary-button" type="button" @click="stop">停止生成</button><button v-else class="primary-button" :disabled="loading || !question.trim()" type="submit">发送 <span>→</span></button></form></section>
       <aside class="chat-sources panel"><div class="chat-panel-heading"><div><p class="eyebrow">引用来源</p><h2>引用来源</h2></div><span v-if="sources.length" class="section-meta">{{ sources.length }} 个片段</span></div><div v-if="sources.length" class="source-list"><article v-for="(source, index) in sources" :key="`${source.documentObjectKey}-${index}`" class="source-card"><span class="source-index">{{ index + 1 }}</span><div><strong>{{ source.documentObjectKey.split('/').pop() }}</strong><small>相关度 {{ source.score.toFixed(2) }} · <span class="retriever-badge" :class="`retriever-${source.retriever ?? 'vector'}`">{{ retrieverLabel(source.retriever) }}</span></small><p>{{ source.content }}</p></div></article></div><div v-else class="source-empty">发送问题后，检索到的文档片段会显示在这里。</div></aside>
     </section>

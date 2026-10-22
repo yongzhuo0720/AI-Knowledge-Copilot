@@ -7,6 +7,8 @@
  * 放在这里才有测试能钉住它。
  */
 
+import type { ConversationMessage, KnowledgeAgentAnswer } from '@/services/api'
+
 /**
  * 每个工具 `result_count` 的量词。
  *
@@ -27,4 +29,20 @@ export const RESULT_UNITS: Record<string, string> = {
  */
 export function resultUnit(tool: string): string {
   return RESULT_UNITS[tool] ?? '条'
+}
+
+/**
+ * 把一条 ASSISTANT 消息还原成 Agent 结果面板的展示结构。
+ *
+ * 复看历史会话和刚执行完一次任务做的是同一件事，曾经是两份一模一样的
+ * 三元表达式；收在这里保证两处永远一致。传进来的不是 ASSISTANT 消息时
+ * 返回 null，调用方据此显示空面板而不是报错。
+ */
+export function toAgentAnswer(message: ConversationMessage): KnowledgeAgentAnswer | null {
+  if (message.role !== 'ASSISTANT') return null
+  return {
+    answer: message.content,
+    sources: message.sources,
+    steps: message.agentSteps ?? [],
+  }
 }

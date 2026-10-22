@@ -9,6 +9,7 @@ import {
   type RetrievalMode,
 } from '@/services/api'
 import { retrieverLabel } from '@/services/labels'
+import { isSendHotkey } from '@/services/input'
 import { useWorkspaceContext } from '@/composables/useWorkspaceContext'
 
 const { currentUser, workspaces, workspaceId, knowledgeBases, loadContext, switchWorkspace, onContextChange } = useWorkspaceContext()
@@ -135,10 +136,8 @@ async function runComparison() {
   }
 }
 
-/** 检索框的回车：输入法选词阶段不触发，Shift+Enter 留给换行。 */
 function handleQueryKeydown(event: KeyboardEvent) {
-  if (event.key !== 'Enter' || event.shiftKey) return
-  if (event.isComposing || event.keyCode === 229) return
+  if (!isSendHotkey(event)) return
   event.preventDefault()
   void runDebug()
 }
