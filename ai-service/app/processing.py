@@ -4,7 +4,6 @@ from threading import Event, Lock, Thread
 from uuid import uuid4
 
 from app.chunking import chunk_document
-from app.document_blocks import extract_blocks
 from app.indexing import index_chunks
 from app.schemas import ParseDocumentRequest, ParseTaskResponse
 from app.settings import settings
@@ -288,13 +287,3 @@ def _from_stored(task: StoredTask) -> ParseTaskResponse:
 def _failure_reason(exception: Exception) -> str:
     message = str(exception).strip() or exception.__class__.__name__
     return f"{exception.__class__.__name__}: {message}"[:2000]
-
-
-def _extract_text(content: bytes, content_type: str, filename: str) -> str:
-    """把文档抽成一段纯文本。
-
-    主路径是 :func:`app.document_blocks.extract_blocks`（结构化块），它才能被
-    结构感知切片器利用。这个函数是「只要平文本」的便捷入口，用于调试与既有调用方 ——
-    注意它**不保留**标题层级，所以不要用它来做切片。
-    """
-    return "\n".join(block.text for block in extract_blocks(content, content_type, filename))

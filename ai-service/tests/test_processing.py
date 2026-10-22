@@ -7,7 +7,6 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.processing import (
     _TaskHeartbeat,
-    _extract_text,
     _heartbeat_interval,
     get_parse_task,
     process_parse_task,
@@ -54,10 +53,6 @@ def test_create_parse_task_accepts_camel_case_request() -> None:
 
     assert response.status_code == 200
     assert response.json()["data"]["object_key"] == "kb/20/guide.pdf"
-
-
-def test_extracts_plain_text() -> None:
-    assert _extract_text("团队知识库".encode(), "text/plain", "guide.txt") == "团队知识库"
 
 
 def test_processing_task_completes_after_extracting_and_indexing(monkeypatch) -> None:

@@ -8,7 +8,7 @@
 
 import pytest
 
-from app.chunking import chunk_blocks, chunk_document, chunk_text, render_prefix, windows
+from app.chunking import chunk_blocks, chunk_document, render_prefix, windows
 from app.document_blocks import DocumentBlock
 
 
@@ -161,29 +161,6 @@ def test_chunk_blocks_rejects_non_positive_size() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# 纯文本入口
-# --------------------------------------------------------------------------- #
-
-def test_chunk_text_detects_markdown_headings() -> None:
-    chunks = chunk_text("# 甲\n\n甲正文\n\n# 乙\n\n乙正文")
-
-    assert chunks == ["甲\n\n甲正文", "乙\n\n乙正文"]
-
-
-def test_chunk_text_treats_plain_text_as_paragraphs_without_prefix() -> None:
-    chunks = chunk_text("第一段。\n\n第二段。", size=6, overlap=0)
-
-    assert chunks == ["第一段。", "第二段。"]
-
-
-def test_chunk_text_ignores_inline_hash() -> None:
-    """行内出现的 # 不代表 Markdown 标题（只有行首才是），别把段落切碎。"""
-    chunks = chunk_text("编号是 #3 号文件。\n\n第二段。", size=800, overlap=0)
-
-    assert chunks == ["编号是 #3 号文件。\n第二段。"]
-
-
-# --------------------------------------------------------------------------- #
 # 端到端
 # --------------------------------------------------------------------------- #
 
@@ -222,16 +199,3 @@ def test_chunk_document_keeps_table_rows_intact() -> None:
 def test_chunk_document_raises_on_unsupported_type() -> None:
     with pytest.raises(ValueError, match="unsupported document type"):
         chunk_document(b"\x00", "application/octet-stream", "blob.bin")
-
-
-def test_legacy_split_text_entry_point_is_structure_aware() -> None:
-    """回归保护：``split_text`` 是既有调用方的入口，它也必须拿到结构感知的好处。
-
-    旧实现在这里会先做 ``" ".join(text.split())``，把标题、空行、换行全部压平，
-    再按字符等距切 —— 结果是一片无结构的文本。
-    """
-    from app.indexing import split_text
-
-    chunks = split_text("# 甲\n\n甲正文\n\n# 乙\n\n乙正文", size=800, overlap=120)
-
-    assert chunks == ["甲\n\n甲正文", "乙\n\n乙正文"]

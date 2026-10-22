@@ -27,7 +27,7 @@ overlap 是在猜「答案会不会正好横跨边界」，靠重叠窗口碰运
 没再出现「覆盖索引」四个字，前缀里有，BM25 和向量都能对上。
 """
 
-from app.document_blocks import DocumentBlock, extract_blocks, prose_blocks
+from app.document_blocks import DocumentBlock, extract_blocks
 
 # 相邻多级标题的拼接符。用 ``>`` 是因为它天然表达层级，且不会被中文分词切碎。
 _PATH_SEPARATOR = " > "
@@ -132,17 +132,3 @@ def chunk_document(
 ) -> list[str]:
     """一步到位：字节流 → 结构化块 → chunk 列表。"""
     return chunk_blocks(extract_blocks(content, content_type, filename), size, overlap)
-
-
-def chunk_text(text: str, size: int = 800, overlap: int = 120) -> list[str]:
-    """纯文本入口，供不经过文件类型的调用方使用。
-
-    自动识别 Markdown 标题：只要正文里出现了 ATX 标题（``#`` 开头），
-    就按 Markdown 解析；否则当普通文本按空行分段。这样 ``split_text`` 的
-    既有调用方在传入 Markdown 时也能白拿结构感知的好处。
-    """
-    looks_markdown = any(
-        line.lstrip().startswith("#")
-        for line in text.splitlines()[:200]
-    )
-    return chunk_blocks(prose_blocks(text, markdown=looks_markdown), size, overlap)

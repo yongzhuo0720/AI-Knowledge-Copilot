@@ -110,20 +110,6 @@ def search_knowledge(request: RetrievalRequest) -> dict[str, object]:
     }
 
 
-@app.post("/api/v1/retrieval/compare", response_model=dict[str, object])
-def compare_retrieval(request: RetrievalRequest) -> dict[str, object]:
-    """并排跑三种检索模式，用于对比召回效果（也是 RAG 评估集的取数接口）。"""
-    limit = request.limit
-    return {
-        "code": "0",
-        "message": "success",
-        "data": {
-            mode: retrieve_chunks(request.knowledge_base_id, request.query, limit, mode)
-            for mode in ("vector", "keyword", "hybrid")
-        },
-    }
-
-
 @app.delete("/api/v1/knowledge-bases/{knowledge_base_id}/index", response_model=dict[str, object])
 def delete_knowledge_base_index(knowledge_base_id: int) -> dict[str, object]:
     """供 backend 在删除知识库前清理 Milvus 向量，幂等。"""

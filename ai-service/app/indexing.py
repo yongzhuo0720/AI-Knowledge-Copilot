@@ -27,29 +27,6 @@ def embed(text: str) -> list[float]:
     return vector if norm == 0 else [value / norm for value in vector]
 
 
-def split_text(text: str, size: int | None = None, overlap: int | None = None) -> list[str]:
-    """纯文本切片 —— 结构感知版本。
-
-    保留函数名是为了不打断既有调用方，实现已移到 :mod:`app.chunking`。行为上
-    与旧版有两处根本区别：
-
-    1. 旧版先做 ``" ".join(text.split())``，把换行一起压平，段落边界就此丢失；
-       新版不再压平，而是按标题与空行切成块。
-    2. 旧版按固定字符等距切，会把段落/表格行从中间切断；新版只在块边界上打包。
-
-    默认参数改为 ``None`` 是为了让调用方不传时读配置（``chunk_size`` /
-    ``chunk_overlap``），而不是把 800/120 写死在两处。
-    """
-    from app.chunking import chunk_text
-    from app.settings import settings
-
-    return chunk_text(
-        text,
-        settings.chunk_size if size is None else size,
-        settings.chunk_overlap if overlap is None else overlap,
-    )
-
-
 def _escape_object_key(object_key: str) -> str:
     """转义 Milvus 表达式里的字符串字面量。
 

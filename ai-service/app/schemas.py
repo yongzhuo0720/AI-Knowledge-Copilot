@@ -44,13 +44,6 @@ class RetrievalRequest(BaseModel):
     mode: str | None = Field(default=None, pattern="^(vector|keyword|hybrid)$")
 
 
-class RetrievalChunk(BaseModel):
-    document_object_key: str
-    content: str
-    score: float
-    retriever: str | None = None
-
-
 class AnswerRequest(BaseModel):
     knowledge_base_id: int = Field(gt=0, validation_alias=AliasChoices("knowledge_base_id", "knowledgeBaseId"))
     question: str = Field(min_length=1, max_length=1000)
