@@ -7,7 +7,6 @@ import com.aicopilot.dashboard.IndexedChunkClient;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Profile;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.RestClient;
 
@@ -15,6 +14,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.function.Consumer;
@@ -22,13 +22,28 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 
 @Configuration
-@Profile("local")
 @EnableConfigurationProperties(AiServiceProperties.class)
 public class AiServiceConfiguration {
 
+    private static final String INTERNAL_TOKEN_HEADER = "X-Internal-Token";
+
     @Bean
     RestClient aiServiceRestClient(RestClient.Builder builder, AiServiceProperties properties) {
-        return builder.baseUrl(properties.getBaseUrl()).build();
+        RestClient.Builder configured = builder.baseUrl(properties.getBaseUrl());
+        if (hasInternalToken(properties)) {
+            configured = configured.defaultHeader(INTERNAL_TOKEN_HEADER, properties.getInternalToken());
+        }
+        return configured.build();
+    }
+
+    private static boolean hasInternalToken(AiServiceProperties properties) {
+        return properties.getInternalToken() != null && !properties.getInternalToken().isBlank();
+    }
+
+    private static void applyInternalToken(HttpURLConnection connection, AiServiceProperties properties) {
+        if (hasInternalToken(properties)) {
+            connection.setRequestProperty(INTERNAL_TOKEN_HEADER, properties.getInternalToken());
+        }
     }
 
     @Bean
@@ -58,17 +73,60 @@ public class AiServiceConfiguration {
     }
 
     @Bean
+    KnowledgeIndexClient knowledgeIndexClient(AiServiceProperties properties) {
+        return new KnowledgeIndexClient() {
+            @Override
+            public void deleteKnowledgeBaseIndex(Long knowledgeBaseId) {
+                delete(properties, "/api/v1/knowledge-bases/" + knowledgeBaseId + "/index");
+            }
+
+            @Override
+            public void deleteDocumentIndex(Long knowledgeBaseId, String objectKey) {
+                delete(properties, "/api/v1/knowledge-bases/" + knowledgeBaseId + "/documents/index?object_key="
+                        + URLEncoder.encode(objectKey, StandardCharsets.UTF_8));
+            }
+
+            private void delete(AiServiceProperties properties, String path) {
+                if (!properties.isEnabled()) {
+                    return;
+                }
+                HttpURLConnection connection = null;
+                try {
+                    connection = (HttpURLConnection) new URL(properties.getBaseUrl() + path).openConnection();
+                    applyInternalToken(connection, properties);
+                    connection.setConnectTimeout(5_000);
+                    connection.setReadTimeout(30_000);
+                    connection.setRequestMethod("DELETE");
+                    int status = connection.getResponseCode();
+                    if (status != HttpURLConnection.HTTP_OK && status != HttpURLConnection.HTTP_NO_CONTENT) {
+                        throw new IllegalStateException("AI service rejected index deletion: HTTP " + status);
+                    }
+                } catch (IOException exception) {
+                    throw new IllegalStateException("failed to delete knowledge index", exception);
+                } finally {
+                    if (connection != null) {
+                        connection.disconnect();
+                    }
+                }
+            }
+        };
+    }
+
+    @Bean
     KnowledgeRetrievalClient knowledgeRetrievalClient(AiServiceProperties properties, ObjectMapper objectMapper) {
-        return (knowledgeBaseId, query, limit) -> {
+        return (knowledgeBaseId, query, limit, mode) -> {
             if (!properties.isEnabled()) return List.of();
             try {
                 HttpURLConnection connection = (HttpURLConnection) new URL(
                         properties.getBaseUrl() + "/api/v1/retrieval/search"
                 ).openConnection();
+                applyInternalToken(connection, properties);
                 connection.setRequestMethod("POST");
+                connection.setConnectTimeout(5_000);
+                connection.setReadTimeout(30_000);
                 connection.setDoOutput(true);
                 connection.setRequestProperty("Content-Type", MediaType.APPLICATION_JSON_VALUE);
-                byte[] payload = objectMapper.writeValueAsBytes(new AiServiceRetrievalRequest(knowledgeBaseId, query, limit));
+                byte[] payload = objectMapper.writeValueAsBytes(new AiServiceRetrievalRequest(knowledgeBaseId, query, limit, mode));
                 connection.setFixedLengthStreamingMode(payload.length);
                 try (var outputStream = connection.getOutputStream()) {
                     outputStream.write(payload);
@@ -104,6 +162,7 @@ public class AiServiceConfiguration {
                 connection = (HttpURLConnection) new URL(
                         properties.getBaseUrl() + "/api/v1/answers"
                 ).openConnection();
+                applyInternalToken(connection, properties);
                 connection.setConnectTimeout(10_000);
                 connection.setReadTimeout(90_000);
                 connection.setRequestMethod("POST");
@@ -156,6 +215,7 @@ public class AiServiceConfiguration {
                     connection = (HttpURLConnection) new URL(
                             properties.getBaseUrl() + "/api/v1/answers/stream"
                     ).openConnection();
+                    applyInternalToken(connection, properties);
                     connection.setConnectTimeout(10_000);
                     connection.setReadTimeout(90_000);
                     connection.setRequestMethod("POST");
@@ -177,6 +237,7 @@ public class AiServiceConfiguration {
                     }
                     List<KnowledgeRetrievalChunk> sources = List.of();
                     StringBuilder answer = new StringBuilder();
+                    boolean completed = false;
                     try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
                         String line;
                         String event = null;
@@ -193,13 +254,21 @@ public class AiServiceConfiguration {
                                     }
                                 } else if ("sources".equals(event)) {
                                     sources = toRetrievalChunks(data.path("sources"));
+                                } else if ("error".equals(event)) {
+                                    throw new IllegalStateException(
+                                            "AI service streaming failed: " + data.path("message").asText("unknown error"));
                                 } else if ("complete".equals(event)) {
+                                    completed = true;
                                     if (data.has("answer")) answer = new StringBuilder(data.path("answer").asText());
                                     sources = toRetrievalChunks(data.path("sources"));
                                 }
                                 event = null;
                             }
                         }
+                    }
+                    // 连接中途断开时 BufferedReader 只会安静地返回 null，不校验就会把半截答案当成功返回。
+                    if (!completed) {
+                        throw new IllegalStateException("AI service stream closed before completion");
                     }
                     return new KnowledgeAnswer(answer.toString(), sources);
                 } catch (IOException exception) {
@@ -221,6 +290,7 @@ public class AiServiceConfiguration {
                 HttpURLConnection connection = (HttpURLConnection) new URL(
                         properties.getBaseUrl() + "/api/v1/agents/knowledge"
                 ).openConnection();
+                applyInternalToken(connection, properties);
                 connection.setConnectTimeout(10_000);
                 connection.setReadTimeout(90_000);
                 connection.setRequestMethod("POST");
@@ -276,6 +346,7 @@ public class AiServiceConfiguration {
                         properties.getBaseUrl() + "/api/v1/retrieval/stats?knowledge_base_ids="
                                 + knowledgeBaseIds.stream().map(String::valueOf).collect(java.util.stream.Collectors.joining(","))
                 ).openConnection();
+                applyInternalToken(connection, properties);
                 connection.setRequestMethod("GET");
                 connection.setConnectTimeout(5_000);
                 connection.setReadTimeout(10_000);
@@ -302,7 +373,10 @@ public class AiServiceConfiguration {
             HttpURLConnection connection = (HttpURLConnection) new URL(
                     properties.getBaseUrl() + "/api/v1/document-processing/tasks/" + taskId
             ).openConnection();
+            applyInternalToken(connection, properties);
             connection.setRequestMethod("GET");
+            connection.setConnectTimeout(5_000);
+            connection.setReadTimeout(10_000);
             int statusCode = connection.getResponseCode();
             if (statusCode < 200 || statusCode >= 300) {
                 throw new IllegalStateException("AI service returned HTTP " + statusCode);
@@ -330,7 +404,10 @@ public class AiServiceConfiguration {
             HttpURLConnection connection = (HttpURLConnection) new URL(
                     properties.getBaseUrl() + "/api/v1/document-processing/tasks"
             ).openConnection();
+            applyInternalToken(connection, properties);
             connection.setRequestMethod("POST");
+            connection.setConnectTimeout(5_000);
+            connection.setReadTimeout(30_000);
             connection.setDoOutput(true);
             connection.setRequestProperty("Content-Type", MediaType.APPLICATION_JSON_VALUE);
             byte[] payload = body.getBytes(StandardCharsets.UTF_8);
@@ -359,7 +436,10 @@ public class AiServiceConfiguration {
             HttpURLConnection connection = (HttpURLConnection) new URL(
                     properties.getBaseUrl() + "/api/v1/document-processing/tasks/" + taskId + "/retry"
             ).openConnection();
+            applyInternalToken(connection, properties);
             connection.setRequestMethod("POST");
+            connection.setConnectTimeout(5_000);
+            connection.setReadTimeout(30_000);
             connection.setDoOutput(true);
             connection.setRequestProperty("Content-Type", MediaType.APPLICATION_JSON_VALUE);
             connection.setFixedLengthStreamingMode(0);
@@ -388,7 +468,8 @@ public class AiServiceConfiguration {
                 .map(chunk -> new KnowledgeRetrievalChunk(
                         chunk.path("document_object_key").asText(null),
                         chunk.path("content").asText(),
-                        chunk.path("score").asDouble()
+                        chunk.path("score").asDouble(),
+                        chunk.path("retriever").asText("vector")
                 ))
                 .toList();
     }
@@ -405,7 +486,9 @@ public class AiServiceConfiguration {
     private record AiServiceRetrievalRequest(
             @com.fasterxml.jackson.annotation.JsonProperty("knowledge_base_id") Long knowledgeBaseId,
             String query,
-            int limit
+            int limit,
+            @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+            String mode
     ) {
     }
 

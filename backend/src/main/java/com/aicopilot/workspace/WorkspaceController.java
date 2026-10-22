@@ -1,8 +1,8 @@
 package com.aicopilot.workspace;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
 import com.aicopilot.common.api.ApiResponse;
 import jakarta.validation.Valid;
-import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,7 +19,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/workspaces")
-@Profile("local")
+@Tag(name = "工作空间", description = "工作空间的创建/查询，以及成员管理")
 public class WorkspaceController {
 
     private final WorkspaceService workspaceService;

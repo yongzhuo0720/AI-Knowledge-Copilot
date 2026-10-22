@@ -1,0 +1,112 @@
+{
+  "name": "口语化提问评估集（同一批 md 语料，刻意避开语料用词）",
+  "description": "前三套题（questions.json / questions-new-formats.json）都有一个共同问题：**它们的措辞就是从语料里抄的**。所以 hybrid 能拿满分，查询改写（Multi-Query）自然也就拿不到任何提升 —— 不是它没用，是这批题根本测不出来。这一集的每道题都刻意**不使用语料里的术语**，而是用现场工程师的口语问法：查慢查询说成「找出拖后腿的语句」，覆盖索引说成「不用再回原本那张表去取数」，最左前缀说成「单独查后一个字段却没效果」。语料没变、判分口径没变、库也没变（同一个「RAG 评估集 · 文本语料」），变的只有**提问的措辞**。这样 hybrid 与 rewrite 两列才有可比性。",
+  "judging": "与主评估集同一套口径（app/eval_judging.py，chunk 级）。所有判分串都经过 scripts/verify_question_spans.py 离线核对：必须能在语料切片后**字面命中**，否则指标异常会分不清是「检索没找到」还是「题目本身写错了」。",
+  "corpus": [
+    "db-error-code-catalog.md",
+    "gateway-model-catalog.md",
+    "release-history.md",
+    "db-tuning.md",
+    "hybrid-retrieval.md",
+    "db-errors-general.md",
+    "release-process.md",
+    "gateway-overview.md",
+    "index-basics.md",
+    "retrieval-overview.md"
+  ],
+  "questions": [
+    {
+      "question": "数据库一查就卡，我怎么找出那些拖后腿的语句",
+      "answer_span": ["慢查询日志", "执行计划"],
+      "kind": "paraphrase",
+      "expect_doc": "db-tuning.md",
+      "note": "语料里写的是「慢查询定位」，题干只出现「一查就卡」「拖后腿的语句」。除了「数据库」之外没有任何词与答案片段重合。"
+    },
+    {
+      "question": "表上附加的东西加太多了，为什么插入反而变慢",
+      "answer_span": ["写入时要同步维护索引", "不是越多越好"],
+      "kind": "paraphrase",
+      "expect_doc": "index-basics.md",
+      "note": "整句刻意不出现「索引」二字 —— 候选片段里的「索引」也就没法帮 BM25 命中，只能靠向量理解「附加的东西」指的是索引。"
+    },
+    {
+      "question": "为什么有的查询不用再回原本那张表去取数",
+      "answer_span": ["覆盖索引", "不必回到主表取数据"],
+      "kind": "paraphrase",
+      "expect_doc": "index-basics.md",
+      "note": "把「回表」和「主表」都说成大白话，两个术语一个都不出现。"
+    },
+    {
+      "question": "两个字段一起查很快，单独查后一个却没效果，这是为什么",
+      "answer_any": [
+        ["最左前缀"],
+        ["跳过了前面的列", "后面的列无法单独生效"]
+      ],
+      "kind": "paraphrase",
+      "expect_doc": "db-tuning.md 或 index-basics.md",
+      "note": "「最左前缀」这个术语在题干里完全没有出现；两篇文档各有一处讲同一件事，所以用 answer_any 接受任一。"
+    },
+    {
+      "question": "并发一高就开始排队，是不是把上限开得越大越好",
+      "answer_span": ["连接池", "过大会把数据库压垮"],
+      "kind": "paraphrase",
+      "expect_doc": "db-tuning.md",
+      "note": "题干说「上限」，语料说「连接池」。"
+    },
+    {
+      "question": "两个来源的候选，最后按什么规则合成一个排序",
+      "answer_any": [
+        ["名次", "不使用分数"],
+        ["名次", "倒数后相加"]
+      ],
+      "kind": "paraphrase",
+      "expect_doc": "hybrid-retrieval.md 或 retrieval-overview.md",
+      "note": "题干避开了「融合」「RRF」「倒数排名」三个术语。"
+    },
+    {
+      "question": "为什么不能把两边的得分加起来直接比大小",
+      "answer_any": [
+        ["量纲", "不能直接加权求和"],
+        ["没有上界", "倒数排名融合"]
+      ],
+      "kind": "paraphrase",
+      "expect_doc": "hybrid-retrieval.md",
+      "note": "题干说「得分加起来」，语料说「加权求和」「量纲不同」。"
+    },
+    {
+      "question": "给字段加上之后，为什么还是整张表一行行扫过去",
+      "answer_span": ["函数运算", "隐式转换"],
+      "kind": "paraphrase",
+      "expect_doc": "index-basics.md",
+      "note": "题干不出现「索引」，也不出现「全表扫描」这个术语，只说「整张表一行行扫」。"
+    },
+    {
+      "question": "在事务里顺手调用别的服务，为什么是个坑",
+      "answer_span": ["事务", "外部网络调用放进事务边界内"],
+      "kind": "paraphrase",
+      "expect_doc": "db-tuning.md",
+      "note": "语料说的是「外部网络调用」，题干说的是「调用别的服务」。"
+    },
+    {
+      "question": "线上给大表加一列，为什么要分成好几步来做",
+      "answer_span": ["可空列", "阻塞写入"],
+      "kind": "paraphrase",
+      "expect_doc": "db-tuning.md",
+      "note": "语料讲的是「表结构演进」「拆成小步骤」，题干说的是「分成好几步」。"
+    },
+    {
+      "question": "句子长的片段是不是天生更容易被搜到",
+      "answer_span": ["长度惩罚", "抑制长片段"],
+      "kind": "paraphrase",
+      "expect_doc": "hybrid-retrieval.md",
+      "note": "语料讲的是「关键词检索的长度惩罚参数」，题干只问「长的片段是不是占便宜」。"
+    },
+    {
+      "question": "融合之前每路先取多少条，这个数量怎么权衡",
+      "answer_span": ["候选池", "过小会导致真正相关的片段进不了融合"],
+      "kind": "paraphrase",
+      "expect_doc": "hybrid-retrieval.md",
+      "note": "题干避开了「检索候选池」这个参数名，只说「每路先取多少条」。"
+    }
+  ]
+}

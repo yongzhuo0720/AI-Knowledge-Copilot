@@ -15,4 +15,6 @@ public interface WorkspaceRepository {
     boolean isMember(Long workspaceId, Long userId);
 
     boolean isOwnerOrAdmin(Long workspaceId, Long userId);
+
+    boolean isOwner(Long workspaceId, Long userId);
 }

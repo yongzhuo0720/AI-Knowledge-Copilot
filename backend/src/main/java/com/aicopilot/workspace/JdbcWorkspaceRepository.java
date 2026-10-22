@@ -1,6 +1,5 @@
 package com.aicopilot.workspace;
 
-import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -13,7 +12,6 @@ import java.time.Instant;
 import java.util.List;
 
 @Repository
-@Profile("local")
 public class JdbcWorkspaceRepository implements WorkspaceRepository {
 
     private final JdbcTemplate jdbcTemplate;
@@ -99,6 +97,17 @@ public class JdbcWorkspaceRepository implements WorkspaceRepository {
         Integer count = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM workspace_member WHERE workspace_id = ? AND user_id = ? "
                         + "AND role IN ('OWNER', 'ADMIN')",
+                Integer.class,
+                workspaceId,
+                userId
+        );
+        return count != null && count > 0;
+    }
+
+    @Override
+    public boolean isOwner(Long workspaceId, Long userId) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM workspace_member WHERE workspace_id = ? AND user_id = ? AND role = 'OWNER'",
                 Integer.class,
                 workspaceId,
                 userId

@@ -29,4 +29,19 @@ public class RedisCacheService implements CacheService {
     public void evict(String key) {
         redisTemplate.delete(key);
     }
+
+    @Override
+    public long increment(String key, Duration ttl) {
+        Long value = redisTemplate.opsForValue().increment(key);
+        if (value == null) {
+            throw new IllegalStateException("redis returned no increment result for key " + key);
+        }
+        // 只在计数器刚被创建时下过期时间。
+        // 如果每次自增都 expire，窗口就会被不断续命：攻击者只要一直发请求，
+        // 计数永远不归零，限流就从「临时拦截」变成了「永久封禁」——这是很常见的一个坑。
+        if (value == 1L) {
+            redisTemplate.expire(key, ttl);
+        }
+        return value;
+    }
 }

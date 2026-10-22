@@ -3,12 +3,10 @@ package com.aicopilot.user;
 import com.aicopilot.common.exception.AuthenticationException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 @Component
-@Profile("local")
 public class AuthenticationInterceptor implements HandlerInterceptor {
 
     public static final String AUTHENTICATED_USER_ID = "authenticatedUserId";

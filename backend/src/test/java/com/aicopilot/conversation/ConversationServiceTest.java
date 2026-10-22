@@ -1,5 +1,7 @@
 package com.aicopilot.conversation;
 
+import com.aicopilot.common.api.PageQuery;
+import com.aicopilot.common.api.PageResponse;
 import com.aicopilot.knowledge.KnowledgeAnswer;
 import com.aicopilot.knowledge.KnowledgeAnswerClient;
 import com.aicopilot.knowledge.KnowledgeAgentAnswer;
@@ -14,7 +16,11 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.never;
@@ -28,9 +34,9 @@ class ConversationServiceTest {
         KnowledgeAnswerClient answerClient = mock(KnowledgeAnswerClient.class);
         ConversationSession session = new ConversationSession(7L, 20L, 3L, "产品问答", Instant.now(), Instant.now());
         ConversationMessage previous = new ConversationMessage(1L, 7L, "USER", "之前的问题", Instant.now(), List.of());
-        KnowledgeRetrievalChunk source = new KnowledgeRetrievalChunk("kb/20/guide.txt", "资料内容", 0.8);
+        KnowledgeRetrievalChunk source = new KnowledgeRetrievalChunk("kb/20/guide.txt", "资料内容", 0.8, "hybrid");
         when(repository.findSession(7L, 20L, 3L)).thenReturn(java.util.Optional.of(session));
-        when(repository.findMessages(7L)).thenReturn(List.of(previous));
+        when(repository.findMessages(7L, 20, 0)).thenReturn(List.of(previous));
         when(repository.saveMessage(any(ConversationMessage.class))).thenAnswer(invocation -> {
             ConversationMessage message = invocation.getArgument(0);
             return new ConversationMessage(message.role().equals("USER") ? 2L : 3L, message.sessionId(),
@@ -50,6 +56,32 @@ class ConversationServiceTest {
     }
 
     @Test
+    void sendsOnlyTheRecentHistoryWindowToTheModel() {
+        ConversationRepository repository = mock(ConversationRepository.class);
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        KnowledgeAnswerClient answerClient = mock(KnowledgeAnswerClient.class);
+        when(repository.findSession(7L, 20L, 3L)).thenReturn(java.util.Optional.of(
+                new ConversationSession(7L, 20L, 3L, "长会话", Instant.now(), Instant.now())));
+        when(repository.findMessages(7L, 20, 0)).thenReturn(List.of());
+        when(repository.saveMessage(any(ConversationMessage.class))).thenAnswer(invocation -> {
+            ConversationMessage message = invocation.getArgument(0);
+            return new ConversationMessage(9L, message.sessionId(), message.role(), message.content(),
+                    Instant.now(), message.sources());
+        });
+        when(answerClient.answer(20L, "当前问题", List.of())).thenReturn(new KnowledgeAnswer("回答", List.of()));
+
+        new ConversationService(repository, knowledgeService, answerClient)
+                .ask(3L, 20L, 7L, new CreateMessageRequest("当前问题"));
+
+        // 这条断言守的是「成本不会随会话长度无界增长」：
+        // 无论会话聊到第 3 轮还是第 300 轮，喂给模型的历史都只能是最近 20 条。
+        // 如果哪天有人把它改回「查全部」，这个测试会立刻红。
+        verify(repository).findMessages(7L, 20, 0);
+        // 而且整个提问过程只查这一次历史 —— 多查一次就说明有人又加了一条「查全部」的路径
+        verify(repository, times(1)).findMessages(anyLong(), anyInt(), anyLong());
+    }
+
+    @Test
     void rejectsAccessToAnotherUsersSession() {
         ConversationRepository repository = mock(ConversationRepository.class);
         KnowledgeService knowledgeService = mock(KnowledgeService.class);
@@ -57,10 +89,10 @@ class ConversationServiceTest {
 
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
                         new ConversationService(repository, knowledgeService, mock(KnowledgeAnswerClient.class))
-                                .findMessages(99L, 20L, 7L))
+                                .findMessages(99L, 20L, 7L, new com.aicopilot.common.api.PageQuery(0, 20)))
                 .isInstanceOf(com.aicopilot.common.exception.AccessDeniedException.class)
                 .hasMessage("user cannot access this conversation");
-        verify(repository, never()).findMessages(7L);
+        verify(repository, never()).findMessages(any(Long.class), anyInt(), anyLong());
     }
 
     @Test
@@ -102,10 +134,10 @@ class ConversationServiceTest {
         KnowledgeService knowledgeService = mock(KnowledgeService.class);
         KnowledgeAgentClient agentClient = mock(KnowledgeAgentClient.class);
         ConversationSession session = new ConversationSession(7L, 20L, 3L, "Agent 会话", Instant.now(), Instant.now());
-        KnowledgeRetrievalChunk source = new KnowledgeRetrievalChunk("kb/20/guide.txt", "资料内容", 0.9);
+        KnowledgeRetrievalChunk source = new KnowledgeRetrievalChunk("kb/20/guide.txt", "资料内容", 0.9, "hybrid");
         KnowledgeAgentStep step = new KnowledgeAgentStep("knowledge_search", "发布流程", 1);
         when(repository.findSession(7L, 20L, 3L)).thenReturn(java.util.Optional.of(session));
-        when(repository.findMessages(7L)).thenReturn(List.of());
+        when(repository.findMessages(7L, 20, 0)).thenReturn(List.of());
         when(repository.saveMessage(any(ConversationMessage.class))).thenAnswer(invocation -> {
             ConversationMessage message = invocation.getArgument(0);
             return new ConversationMessage(message.role().equals("USER") ? 2L : 3L, message.sessionId(),
@@ -128,14 +160,75 @@ class ConversationServiceTest {
         ConversationRepository repository = mock(ConversationRepository.class);
         KnowledgeService knowledgeService = mock(KnowledgeService.class);
         ConversationSession session = new ConversationSession(7L, 20L, 3L, "发布流程", Instant.now(), Instant.now());
-        when(repository.findSessions(20L, 3L, "发布")).thenReturn(List.of(session));
+        when(repository.findSessions(20L, 3L, "发布", 5, 10L)).thenReturn(List.of(session));
+        when(repository.countSessions(20L, 3L, "发布")).thenReturn(17L);
 
-        List<ConversationSession> result = new ConversationService(
+        PageResponse<ConversationSession> result = new ConversationService(
                 repository, knowledgeService, mock(KnowledgeAnswerClient.class)
-        ).findSessions(3L, 20L, "发布");
+        ).findSessions(3L, 20L, "发布", new PageQuery(2, 5));
 
-        assertThat(result).containsExactly(session);
+        assertThat(result.items()).containsExactly(session);
+        // 搜索条件、分页参数都要原样传到 SQL 层，并且总数要能对上
+        assertThat(result.totalElements()).isEqualTo(17);
+        assertThat(result.page()).isEqualTo(2);
+        assertThat(result.size()).isEqualTo(5);
         verify(knowledgeService).assertKnowledgeBaseAccess(20L, 3L);
-        verify(repository).findSessions(20L, 3L, "发布");
+        verify(repository).findSessions(20L, 3L, "发布", 5, 10L);
+    }
+
+    @Test
+    void reportsWhetherThereAreOlderMessagesToLoad() {
+        ConversationRepository repository = mock(ConversationRepository.class);
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        when(repository.findSession(7L, 20L, 3L)).thenReturn(java.util.Optional.of(
+                new ConversationSession(7L, 20L, 3L, "长会话", Instant.now(), Instant.now())));
+        ConversationMessage message = new ConversationMessage(
+                30L, 7L, "USER", "最近一句", Instant.now(), List.of());
+        when(repository.findMessages(7L, 20, 0L)).thenReturn(List.of(message));
+        when(repository.countMessages(7L)).thenReturn(137L);
+
+        PageResponse<ConversationMessage> firstPage = new ConversationService(
+                repository, knowledgeService, mock(KnowledgeAnswerClient.class)
+        ).findMessages(3L, 20L, 7L, PageQuery.of(0, 20));
+
+        assertThat(firstPage.items()).containsExactly(message);
+        assertThat(firstPage.totalElements()).isEqualTo(137);
+        assertThat(firstPage.totalPages()).isEqualTo(7);
+        // 前端靠它决定要不要显示「加载更早的消息」
+        assertThat(firstPage.hasNext()).isTrue();
+    }
+
+    @Test
+    void reportsNoMorePagesWhenTheLastWindowIsReached() {
+        ConversationRepository repository = mock(ConversationRepository.class);
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        when(repository.findSession(7L, 20L, 3L)).thenReturn(java.util.Optional.of(
+                new ConversationSession(7L, 20L, 3L, "短会话", Instant.now(), Instant.now())));
+        ConversationMessage message = new ConversationMessage(1L, 7L, "USER", "第一句", Instant.now(), List.of());
+        when(repository.findMessages(7L, 20, 20L)).thenReturn(List.of(message));
+        when(repository.countMessages(7L)).thenReturn(21L);
+
+        PageResponse<ConversationMessage> lastPage = new ConversationService(
+                repository, knowledgeService, mock(KnowledgeAnswerClient.class)
+        ).findMessages(3L, 20L, 7L, PageQuery.of(1, 20));
+
+        assertThat(lastPage.hasNext()).isFalse();
+        assertThat(lastPage.totalPages()).isEqualTo(2);
+    }
+
+    @Test
+    void clampsAnOversizedPageRequestInsteadOfTrustingTheClient() {
+        ConversationRepository repository = mock(ConversationRepository.class);
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        when(repository.findSession(7L, 20L, 3L)).thenReturn(java.util.Optional.of(
+                new ConversationSession(7L, 20L, 3L, "会话", Instant.now(), Instant.now())));
+        when(repository.findMessages(eq(7L), anyInt(), anyLong())).thenReturn(List.of());
+        when(repository.countMessages(7L)).thenReturn(0L);
+
+        new ConversationService(repository, knowledgeService, mock(KnowledgeAnswerClient.class))
+                .findMessages(3L, 20L, 7L, PageQuery.of(-3, 1_000_000));
+
+        // `?size=1000000` 不能真的变成「一次捞一百万条」
+        verify(repository).findMessages(7L, 100, 0L);
     }
 }

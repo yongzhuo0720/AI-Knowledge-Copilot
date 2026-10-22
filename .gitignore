@@ -29,3 +29,10 @@ venv/
 # Runtime files
 logs/
 uploads/
+
+# 临时排查目录（一次性探针脚本、抓取的中间输出）
+# 有价值的脚本请固化进 ai-service/scripts/，不要留在顶层临时目录里
+.tmppkg/
+
+# 本地个人笔记（不入库）
+.workbuddy/

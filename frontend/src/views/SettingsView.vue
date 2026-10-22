@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import {
   addWorkspaceMember,
@@ -29,6 +29,10 @@ const message = ref('')
 const activeWorkspace = computed(() => workspaces.value.find((item) => String(item.id) === workspaceId.value))
 const canManageMembers = computed(() => activeWorkspace.value?.ownerUserId === currentUser.value?.id || members.value.some((item) => item.userId === currentUser.value?.id && item.role === 'ADMIN'))
 
+/** 角色显示为中文（数据本身仍是英文枚举） */
+const ROLE_LABELS: Record<string, string> = { OWNER: '所有者', ADMIN: '管理员', MEMBER: '成员' }
+const roleLabel = (value: string) => ROLE_LABELS[value] ?? value
+
 async function loadContext() {
   if (!currentUser.value) return
   loading.value = true
@@ -48,6 +52,8 @@ async function loadMembers() {
 
 async function changeWorkspace() {
   localStorage.setItem('activeWorkspaceId', workspaceId.value)
+  // 局部切换必须通知全局侧栏（App.vue 与跨标签同步都监听这个事件）
+  window.dispatchEvent(new CustomEvent('aicopilot-workspace-changed', { detail: { workspaceId: workspaceId.value } }))
   await loadMembers()
 }
 
@@ -65,15 +71,30 @@ async function submitMember() {
   finally { loading.value = false }
 }
 
-onMounted(() => { void loadContext() })
+/** 侧栏（或另一标签页）切换工作空间时同步本页。幂等：自己派发的同一事件到达时直接返回。 */
+function syncWorkspaceFromGlobal(event: Event) {
+  const next = (event as CustomEvent<{ workspaceId?: string }>).detail?.workspaceId ?? localStorage.getItem('activeWorkspaceId') ?? ''
+  if (!next || next === workspaceId.value) return
+  workspaceId.value = next
+  void loadMembers()
+}
+
+onMounted(() => {
+  window.addEventListener('aicopilot-workspace-changed', syncWorkspaceFromGlobal)
+  void loadContext()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('aicopilot-workspace-changed', syncWorkspaceFromGlobal)
+})
 </script>
 
 <template>
   <main class="settings-shell">
-    <header class="settings-header"><div><p class="eyebrow">WORKSPACE SETTINGS</p><h1>管理协作边界。</h1><p class="settings-summary">成员只能访问自己加入的工作空间；知识库、文档、会话和 Agent 请求都会继承这层权限。</p></div><span class="agent-badge"><span class="status-dot online" />权限隔离已启用</span></header>
+    <header class="settings-header"><div><p class="eyebrow">工作空间设置</p><h1>管理协作边界</h1><p class="settings-summary">成员只能访问自己加入的工作空间；知识库、文档、会话和 Agent 请求都会继承这层权限。</p></div><span class="agent-badge"><span class="status-dot online" />权限隔离已启用</span></header>
     <section class="settings-grid">
-      <section class="panel settings-card"><div class="settings-card-heading"><div><p class="eyebrow">WORKSPACE</p><h2>当前空间</h2></div><span class="section-meta">{{ activeWorkspace ? `#${activeWorkspace.id}` : '—' }}</span></div><label>选择工作空间<select v-model="workspaceId" :disabled="loading || !workspaces.length" @change="changeWorkspace"><option v-for="workspace in workspaces" :key="workspace.id" :value="String(workspace.id)">{{ workspace.name }}</option></select></label><div v-if="activeWorkspace" class="settings-facts"><span>OWNER</span><strong>用户 #{{ activeWorkspace.ownerUserId }}</strong><span>MEMBERS</span><strong>{{ members.length }} 人</strong></div></section>
-      <section class="panel settings-card"><div class="settings-card-heading"><div><p class="eyebrow">MEMBERS</p><h2>成员与角色</h2></div><span class="section-meta">{{ members.length }} 人</span></div><form v-if="canManageMembers" class="member-form" @submit.prevent="submitMember"><label>用户 ID<input v-model="memberUserId" inputmode="numeric" min="1" placeholder="例如：2" /></label><label>角色<select v-model="memberRole"><option value="MEMBER">MEMBER · 普通成员</option><option value="ADMIN">ADMIN · 管理员</option><option value="OWNER">OWNER · 所有者</option></select></label><button class="primary-button" :disabled="loading || !memberUserId" type="submit">添加成员 <span>→</span></button></form><p v-else class="settings-notice">你是普通成员，只能查看当前空间成员。</p><div v-if="members.length" class="member-list"><article v-for="member in members" :key="member.userId" class="member-row"><span class="user-avatar">{{ String(member.userId).slice(-2) }}</span><div><strong>用户 #{{ member.userId }}</strong><small>{{ member.joinedAt ? new Date(member.joinedAt).toLocaleDateString('zh-CN') : '刚刚加入' }}</small></div><span class="status-pill" :class="member.role === 'OWNER' ? 'active' : ''">{{ member.role }}</span></article></div><div v-else class="settings-empty">当前空间还没有成员信息。</div></section>
+      <section class="panel settings-card"><div class="settings-card-heading"><div><p class="eyebrow">当前空间</p><h2>当前空间</h2></div><span class="section-meta">{{ activeWorkspace ? `#${activeWorkspace.id}` : '—' }}</span></div><label>选择工作空间<select v-model="workspaceId" :disabled="loading || !workspaces.length" @change="changeWorkspace"><option v-for="workspace in workspaces" :key="workspace.id" :value="String(workspace.id)">{{ workspace.name }}</option></select></label><div v-if="activeWorkspace" class="settings-facts"><span>所有者</span><strong>用户 #{{ activeWorkspace.ownerUserId }}</strong><span>成员数</span><strong>{{ members.length }} 人</strong></div></section>
+      <section class="panel settings-card"><div class="settings-card-heading"><div><p class="eyebrow">成员</p><h2>成员与角色</h2></div><span class="section-meta">{{ members.length }} 人</span></div><form v-if="canManageMembers" class="member-form" @submit.prevent="submitMember"><label>用户 ID<input v-model="memberUserId" inputmode="numeric" min="1" placeholder="例如：2" /></label><label>角色<select v-model="memberRole"><option value="MEMBER">普通成员</option><option value="ADMIN">管理员</option></select></label><button class="primary-button" :disabled="loading || !memberUserId" type="submit">添加成员 <span>→</span></button></form><p v-else class="settings-notice">你是普通成员，只能查看当前空间成员。</p><div v-if="members.length" class="member-list"><article v-for="member in members" :key="member.userId" class="member-row"><span class="user-avatar">{{ String(member.userId).slice(-2) }}</span><div><strong>用户 #{{ member.userId }}</strong><small>{{ member.joinedAt ? new Date(member.joinedAt).toLocaleDateString('zh-CN') : '刚刚加入' }}</small></div><span class="status-pill" :class="member.role === 'OWNER' ? 'active' : ''">{{ roleLabel(member.role) }}</span></article></div><div v-else class="settings-empty">当前空间还没有成员信息。</div></section>
     </section>
     <p v-if="message" class="message settings-message" :class="{ 'message-error': message.includes('失败') || message.includes('错误') }">{{ message }}</p>
   </main>

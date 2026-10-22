@@ -1,9 +1,9 @@
 package com.aicopilot.knowledge;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
 import com.aicopilot.common.api.ApiResponse;
 import com.aicopilot.user.AuthenticationInterceptor;
 import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -14,7 +14,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/workspaces/{workspaceId}/documents")
-@Profile("local")
+@Tag(name = "工作空间文档", description = "按工作空间维度列出文档及处理状态")
 public class WorkspaceDocumentController {
 
     private final KnowledgeService knowledgeService;

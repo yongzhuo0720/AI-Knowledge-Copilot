@@ -34,4 +34,11 @@ class MinioStorageServiceTest {
 
         verify(minioClient).putObject(any());
     }
+
+    @Test
+    void deletesObjectFromConfiguredBucket() throws Exception {
+        storageService.delete("kb/20/guide.txt");
+
+        verify(minioClient).removeObject(any());
+    }
 }

@@ -1,19 +1,117 @@
 package com.aicopilot.knowledge;
 
 import com.aicopilot.common.storage.ObjectStorageService;
+import com.aicopilot.common.exception.AccessDeniedException;
+import com.aicopilot.common.exception.BusinessException;
 import com.aicopilot.workspace.WorkspaceRepository;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.io.ByteArrayInputStream;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class KnowledgeServiceTest {
+
+    @ParameterizedTest
+    @ValueSource(strings = {"kb/21/private.pdf", "kb/200/private.pdf", "private.pdf"})
+    void rejectsRegistrationOfObjectsOutsideTheAuthorizedKnowledgeBase(String objectKey) {
+        KnowledgeRepository repository = mock(KnowledgeRepository.class);
+        WorkspaceRepository workspaceRepository = mock(WorkspaceRepository.class);
+        DocumentProcessingClient processingClient = mock(DocumentProcessingClient.class);
+        when(repository.findKnowledgeBase(20L)).thenReturn(Optional.of(
+                new KnowledgeBase(20L, 10L, "资料", null, "ACTIVE")));
+        when(workspaceRepository.isMember(10L, 7L)).thenReturn(true);
+        KnowledgeService service = new KnowledgeService(repository, processingClient,
+                mock(ObjectStorageService.class), mock(KnowledgeRetrievalClient.class),
+                mock(KnowledgeAnswerClient.class), workspaceRepository);
+
+        assertThatThrownBy(() -> service.registerDocument(7L, 20L,
+                new RegisterDocumentRequest("private.pdf", objectKey, "application/pdf", 1024L)))
+                .isInstanceOf(AccessDeniedException.class);
+
+        verifyNoInteractions(processingClient);
+        verify(repository, org.mockito.Mockito.never()).saveDocument(any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"guide.txt", "folder/guide.txt", "C:\\folder\\guide.txt", "C:\\folder/sub/guide.txt", "folder/sub\\guide.txt"})
+    void uploadsOnlyTheBasenameWhenFilenameIncludesDirectories(String filename) {
+        KnowledgeRepository repository = mock(KnowledgeRepository.class);
+        DocumentProcessingClient processingClient = mock(DocumentProcessingClient.class);
+        ObjectStorageService storageService = mock(ObjectStorageService.class);
+        when(repository.saveDocument(any(KnowledgeDocument.class))).thenAnswer(invocation -> {
+            KnowledgeDocument document = invocation.getArgument(0);
+            return new KnowledgeDocument(30L, document.knowledgeBaseId(), document.originalFilename(),
+                    document.objectKey(), document.contentType(), document.fileSize(), document.status(),
+                    document.processingTaskId(), document.createdAt());
+        });
+        when(processingClient.submit(any(DocumentProcessingRequest.class)))
+                .thenReturn(new DocumentProcessingResponse("task-1", "", "ACCEPTED"));
+        KnowledgeService service = new KnowledgeService(repository, processingClient, storageService,
+                mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class));
+        ByteArrayInputStream inputStream = new ByteArrayInputStream(new byte[] {1});
+
+        KnowledgeDocumentResponse response = service.uploadDocument(20L, filename, "text/plain", 1L, inputStream);
+
+        assertThat(response.originalFilename()).isEqualTo("guide.txt");
+        verify(storageService).upload(argThat(key -> key.startsWith("kb/20/") && key.endsWith("/guide.txt")),
+                eq(inputStream), eq(1L), eq("text/plain"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"report.xlsx", "legacy.xlsm", "slides.pptx", "page.html", "page.htm", "page.xhtml", "notes.md"})
+    void uploadsEverySupportedDocumentFormat(String filename) {
+        KnowledgeRepository repository = mock(KnowledgeRepository.class);
+        DocumentProcessingClient processingClient = mock(DocumentProcessingClient.class);
+        ObjectStorageService storageService = mock(ObjectStorageService.class);
+        when(repository.saveDocument(any(KnowledgeDocument.class))).thenAnswer(invocation -> {
+            KnowledgeDocument document = invocation.getArgument(0);
+            return new KnowledgeDocument(30L, document.knowledgeBaseId(), document.originalFilename(),
+                    document.objectKey(), document.contentType(), document.fileSize(), document.status(),
+                    document.processingTaskId(), document.createdAt());
+        });
+        when(processingClient.submit(any(DocumentProcessingRequest.class)))
+                .thenReturn(new DocumentProcessingResponse("task-1", "", "ACCEPTED"));
+        KnowledgeService service = new KnowledgeService(repository, processingClient, storageService,
+                mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class));
+
+        KnowledgeDocumentResponse response = service.uploadDocument(
+                20L, filename, "application/octet-stream", 1L, new ByteArrayInputStream(new byte[] {1}));
+
+        assertThat(response.originalFilename()).isEqualTo(filename);
+        verify(storageService).upload(argThat(key -> key.startsWith("kb/20/") && key.endsWith("/" + filename)),
+                any(), eq(1L), eq("application/octet-stream"));
+    }
+
+    @Test
+    void rejectsUnsupportedFileTypeBeforeStoringTheObject() {
+        KnowledgeRepository repository = mock(KnowledgeRepository.class);
+        DocumentProcessingClient processingClient = mock(DocumentProcessingClient.class);
+        ObjectStorageService storageService = mock(ObjectStorageService.class);
+        KnowledgeService service = new KnowledgeService(repository, processingClient, storageService,
+                mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class));
+
+        assertThatThrownBy(() -> service.uploadDocument(
+                20L, "malware.exe", "application/octet-stream", 1L, new ByteArrayInputStream(new byte[] {1})))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getCode()).isEqualTo("UNSUPPORTED_FILE_TYPE"));
+
+        verifyNoInteractions(storageService, processingClient);
+        verify(repository, org.mockito.Mockito.never()).saveDocument(any());
+    }
 
     @Test
     void createsKnowledgeBaseWithNormalizedFields() {

@@ -1,6 +1,5 @@
 package com.aicopilot.knowledge;
 
-import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -13,7 +12,6 @@ import java.time.Instant;
 import java.util.List;
 
 @Repository
-@Profile("local")
 public class JdbcKnowledgeRepository implements KnowledgeRepository {
 
     private final JdbcTemplate jdbcTemplate;

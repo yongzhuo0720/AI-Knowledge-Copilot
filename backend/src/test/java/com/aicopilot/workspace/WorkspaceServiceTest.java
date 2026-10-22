@@ -78,6 +78,30 @@ class WorkspaceServiceTest {
     }
 
     @Test
+    void rejectsAssigningOwnerRoleThroughTheMemberApi() {
+        WorkspaceRepository repository = mock(WorkspaceRepository.class);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        new WorkspaceService(repository).addMember(10L, new AddWorkspaceMemberRequest(2L, "OWNER")))
+                .isInstanceOfSatisfying(com.aicopilot.common.exception.BusinessException.class,
+                        exception -> assertThat(exception.getCode()).isEqualTo("OWNER_ROLE_PROTECTED"));
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).addMember(any());
+    }
+
+    @Test
+    void rejectsChangingTheWorkspaceOwnersRole() {
+        WorkspaceRepository repository = mock(WorkspaceRepository.class);
+        when(repository.isOwnerOrAdmin(10L, 2L)).thenReturn(true);
+        when(repository.isOwner(10L, 1L)).thenReturn(true);
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        new WorkspaceService(repository).addMember(2L, 10L, new AddWorkspaceMemberRequest(1L, "MEMBER")))
+                .isInstanceOfSatisfying(com.aicopilot.common.exception.BusinessException.class,
+                        exception -> assertThat(exception.getCode()).isEqualTo("OWNER_ROLE_PROTECTED"));
+        org.mockito.Mockito.verify(repository, org.mockito.Mockito.never()).addMember(any());
+    }
+
+    @Test
     void rejectsMemberListForNonMember() {
         WorkspaceRepository repository = mock(WorkspaceRepository.class);
         when(repository.isMember(10L, 99L)).thenReturn(false);

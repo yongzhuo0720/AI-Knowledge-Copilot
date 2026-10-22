@@ -2,9 +2,9 @@ package com.aicopilot.knowledge;
 
 import com.aicopilot.common.storage.ObjectStorageService;
 import com.aicopilot.common.exception.AccessDeniedException;
+import com.aicopilot.common.exception.BusinessException;
 import com.aicopilot.workspace.WorkspaceRepository;
 import com.aicopilot.conversation.ConversationMessage;
-import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,11 +13,20 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
-@Profile("local")
 public class KnowledgeService {
+
+    /** 与 ai-service 的 document_blocks 解析能力保持一致。 */
+    private static final Set<String> SUPPORTED_EXTENSIONS = Set.of(
+            ".txt", ".md", ".csv", ".tsv",
+            ".pdf", ".docx",
+            ".xlsx", ".xlsm", ".pptx",
+            ".html", ".htm", ".xhtml"
+    );
 
     private final KnowledgeRepository knowledgeRepository;
     private final DocumentProcessingClient documentProcessingClient;
@@ -103,11 +112,14 @@ public class KnowledgeService {
     @Transactional
     public KnowledgeDocumentResponse registerDocument(Long userId, Long knowledgeBaseId, RegisterDocumentRequest request) {
         authorizeKnowledgeBase(knowledgeBaseId, userId);
+        String originalFilename = request.originalFilename().trim();
+        String objectKey = request.objectKey().trim();
+        validateUploadMetadata(knowledgeBaseId, originalFilename, objectKey);
         KnowledgeDocument document = knowledgeRepository.saveDocument(new KnowledgeDocument(
                 null,
                 knowledgeBaseId,
-                request.originalFilename().trim(),
-                request.objectKey().trim(),
+                originalFilename,
+                objectKey,
                 request.contentType().trim(),
                 request.fileSize(),
                 "UPLOADED",
@@ -148,9 +160,12 @@ public class KnowledgeService {
         authorizeKnowledgeBase(knowledgeBaseId, userId);
         String safeFilename = originalFilename == null || originalFilename.isBlank()
                 ? "unnamed-file"
-                : originalFilename.substring(originalFilename.lastIndexOf('\\') + 1)
-                .substring(originalFilename.lastIndexOf('/') + 1)
-                .trim();
+                // 两种分隔符都可能出现，必须先取两者中更靠后的那个位置再截。
+                // 先按 '\' 截、再拿原串的 '/' 下标套到结果上，会把 guide.txt 截成 de.txt。
+                : originalFilename.substring(
+                        Math.max(originalFilename.lastIndexOf('\\'), originalFilename.lastIndexOf('/')) + 1
+                ).trim();
+        validateExtension(safeFilename);
         String objectKey = "kb/" + knowledgeBaseId + "/" + UUID.randomUUID() + "/" + safeFilename;
         objectStorageService.upload(objectKey, inputStream, fileSize, contentType);
         return registerDocument(userId, knowledgeBaseId, new RegisterDocumentRequest(
@@ -189,7 +204,8 @@ public class KnowledgeService {
     @Transactional(readOnly = true)
     public List<KnowledgeRetrievalChunk> search(Long userId, Long knowledgeBaseId, KnowledgeSearchRequest request) {
         authorizeKnowledgeBase(knowledgeBaseId, userId);
-        return knowledgeRetrievalClient.search(knowledgeBaseId, request.query().trim(), request.resolvedLimit());
+        return knowledgeRetrievalClient.search(
+                knowledgeBaseId, request.query().trim(), request.resolvedLimit(), request.resolvedMode());
     }
 
     @Transactional(readOnly = true)
@@ -276,6 +292,32 @@ public class KnowledgeService {
     private void authorizeWorkspace(Long workspaceId, Long userId) {
         if (workspaceRepository != null && (userId == null || !workspaceRepository.isMember(workspaceId, userId))) {
             throw new AccessDeniedException("user is not a member of this workspace");
+        }
+    }
+
+    private void validateUploadMetadata(Long knowledgeBaseId, String originalFilename, String objectKey) {
+        validateExtension(originalFilename);
+        // objectKey 由客户端传入时不能信任：只允许当前知识库前缀，否则可以把桶里
+        // 其他知识库的对象注册进来，再借解析任务读出来。
+        String expectedPrefix = "kb/" + knowledgeBaseId + "/";
+        if (!objectKey.startsWith(expectedPrefix)
+                || objectKey.length() <= expectedPrefix.length()
+                || objectKey.contains("..")
+                || objectKey.contains("\\")
+                || objectKey.contains("//")) {
+            throw new AccessDeniedException("object key does not belong to this knowledge base");
+        }
+    }
+
+    private void validateExtension(String filename) {
+        String lower = filename == null ? "" : filename.toLowerCase(Locale.ROOT);
+        int dot = lower.lastIndexOf('.');
+        String extension = dot < 0 ? "" : lower.substring(dot);
+        if (!SUPPORTED_EXTENSIONS.contains(extension)) {
+            throw new BusinessException(
+                    "UNSUPPORTED_FILE_TYPE",
+                    "unsupported file type; supported: txt, md, csv, tsv, pdf, docx, xlsx, xlsm, pptx, html, htm, xhtml"
+            );
         }
     }
 

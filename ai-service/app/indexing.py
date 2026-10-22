@@ -27,11 +27,130 @@ def embed(text: str) -> list[float]:
     return vector if norm == 0 else [value / norm for value in vector]
 
 
-def split_text(text: str, size: int = 800, overlap: int = 120) -> list[str]:
-    text = " ".join(text.split())
-    if not text:
-        return []
-    return [text[start:start + size] for start in range(0, len(text), size - overlap)]
+def split_text(text: str, size: int | None = None, overlap: int | None = None) -> list[str]:
+    """纯文本切片 —— 结构感知版本。
+
+    保留函数名是为了不打断既有调用方，实现已移到 :mod:`app.chunking`。行为上
+    与旧版有两处根本区别：
+
+    1. 旧版先做 ``" ".join(text.split())``，把换行一起压平，段落边界就此丢失；
+       新版不再压平，而是按标题与空行切成块。
+    2. 旧版按固定字符等距切，会把段落/表格行从中间切断；新版只在块边界上打包。
+
+    默认参数改为 ``None`` 是为了让调用方不传时读配置（``chunk_size`` /
+    ``chunk_overlap``），而不是把 800/120 写死在两处。
+    """
+    from app.chunking import chunk_text
+    from app.settings import settings
+
+    return chunk_text(
+        text,
+        settings.chunk_size if size is None else size,
+        settings.chunk_overlap if overlap is None else overlap,
+    )
+
+
+def _escape_object_key(object_key: str) -> str:
+    """转义 Milvus 表达式里的字符串字面量。
+
+    object_key 里可能含反斜杠或双引号（对象名由上传方决定），不转义会让
+    ``object_key == "..."`` 这个表达式被提前闭合，轻则过滤失效，重则语法错误。
+    """
+    return object_key.replace('\\', '\\\\').replace('"', '\\"')
+
+
+# --------------------------------------------------------------------------- #
+# 与 Milvus 的两个硬限制打交道
+# --------------------------------------------------------------------------- #
+
+# Milvus 的 content 字段声明为 VARCHAR(4096)，上限按**字节**算，不是字符。
+# 切片层按 chunk_size（默认 800 字符）打包，正常情况下远不到上限；但 index_chunks
+# 是个公开函数，调用方可以直接把未切片的文本传进来（重建索引脚本、解析降级路径）。
+# 一旦超限，Milvus 会**整批 insert 失败** —— 不是丢一段，是整个文档入库挂掉。
+MAX_CONTENT_BYTES = 4096
+
+
+def split_oversized_content(chunk: str, max_bytes: int = MAX_CONTENT_BYTES) -> list[str]:
+    """把超出字节上限的片段切开，保证「拼回去等于原文」且「不切断字符」。
+
+    为什么要按**字符**遍历而不是 ``chunk[:max_bytes]`` 按字节硬切：
+    一个汉字 3 字节、一个 emoji 4 字节，硬切会把它们从中间劈开，产生非法 UTF-8 序列 ——
+    Milvus 会拒绝，嵌入接口也会报错。而那个错误信息不会告诉你是「切片切坏了」。
+    """
+    if len(chunk.encode("utf-8")) <= max_bytes:
+        return [chunk]
+
+    parts: list[str] = []
+    current: list[str] = []
+    size = 0
+    for char in chunk:
+        width = len(char.encode("utf-8"))
+        # `current` 非空才切：否则单个字符本身就超限时，会切出一个空片段并死循环。
+        if size + width > max_bytes and current:
+            parts.append("".join(current))
+            current = []
+            size = 0
+        current.append(char)
+        size += width
+    if current:
+        parts.append("".join(current))
+    return parts
+
+
+# Milvus 的 query 有一个硬上限：offset + limit 不能超过 16384。
+# 只按 offset 递增分页的话，语料一旦超过这个量就会直接抛
+# "query results exceed the limit size" —— 现象是**知识库小的时候一切正常，
+# 大一点就整体检索失败**，属于最难在生产上复现的一类问题。
+MILVUS_QUERY_OFFSET_CEILING = 16384
+
+
+def iter_all_rows(
+    collection,
+    expression: str,
+    output_fields: list[str],
+    batch_size: int = 1000,
+) -> list[dict]:
+    """分页取出全部匹配行，**跨过 Milvus query 的 offset 上限**。
+
+    先用 ``query`` + offset 分页（小知识库的常见路径，也是最稳的那条）；
+    只有当结果超过 16384 行、offset 已经推不动时才改用 ``query_iterator``（服务端游标）。
+
+    **改用游标时会把前面取到的全部丢弃、从头再取一遍。** 这不是疏漏，是有意的：
+    游标路径只应该在「真的很大」的知识库上被走到，没必要让所有知识库都去承担
+    它可能带来的兼容性风险。多跑的那 16 次 query 相对「整库检索失败」是可以接受的代价。
+    """
+    rows: list[dict] = []
+    offset = 0
+    while offset + batch_size <= MILVUS_QUERY_OFFSET_CEILING:
+        batch = collection.query(
+            expr=expression,
+            output_fields=output_fields,
+            limit=batch_size,
+            offset=offset,
+        )
+        if not batch:
+            return rows
+        rows.extend(batch)
+        if len(batch) < batch_size:
+            return rows
+        offset += batch_size
+
+    rows = []
+    iterator = collection.query_iterator(
+        expr=expression,
+        output_fields=output_fields,
+        batch_size=batch_size,
+    )
+    try:
+        while True:
+            batch = iterator.next()
+            if not batch:
+                return rows
+            rows.extend(batch)
+    finally:
+        # 游标持有服务端资源，异常路径上也必须释放 —— 否则一次失败就会留下一个
+        # 悬空的迭代器，累积下去会把 Milvus 的连接池耗干。
+        iterator.close()
 
 
 def delete_chunks(knowledge_base_id: int, object_key: str) -> None:
@@ -42,9 +161,28 @@ def delete_chunks(knowledge_base_id: int, object_key: str) -> None:
     if not utility.has_collection(COLLECTION_NAME):
         return
     collection = Collection(COLLECTION_NAME)
-    escaped_object_key = object_key.replace('\\', '\\\\').replace('"', '\\"')
-    collection.delete(f'knowledge_base_id == {knowledge_base_id} and object_key == "{escaped_object_key}"')
+    collection.delete(f'knowledge_base_id == {knowledge_base_id} and object_key == "{_escape_object_key(object_key)}"')
     collection.flush()
+    # 语料变了，关键词索引必须失效，否则 BM25 会继续在旧语料上打分
+    _invalidate_keyword_corpus(knowledge_base_id)
+
+
+def delete_knowledge_base_chunks(knowledge_base_id: int) -> None:
+    """删除整个知识库的向量。
+
+    管理员删库时调用：只删 MySQL 行会让向量继续留在 Milvus 里，既能被直接
+    查询到，也会让同名知识库重建时检索到已删除的内容。删除是幂等的。
+    """
+    from pymilvus import Collection, connections, utility
+    from app.settings import settings
+
+    connections.connect(alias="default", host=settings.milvus_host, port=str(settings.milvus_port))
+    if not utility.has_collection(COLLECTION_NAME):
+        return
+    collection = Collection(COLLECTION_NAME)
+    collection.delete(f"knowledge_base_id == {knowledge_base_id}")
+    collection.flush()
+    _invalidate_keyword_corpus(knowledge_base_id)
 
 
 def index_chunks(knowledge_base_id: int, object_key: str, chunks: list[str], replace_existing: bool = False) -> None:
@@ -64,17 +202,45 @@ def index_chunks(knowledge_base_id: int, object_key: str, chunks: list[str], rep
         collection.create_index("embedding", {"index_type": "FLAT", "metric_type": "IP", "params": {}})
     else:
         collection = Collection(COLLECTION_NAME)
+    # 必须在 embed **之前**按字节切好：嵌入的必须正好是要入库的那份文本，
+    # 否则向量和内容对不上（检索按截断后的内容命中，返回的却是另一段）。
+    chunks = [part for chunk in chunks for part in split_oversized_content(chunk)]
     embeddings = [embed(chunk) for chunk in chunks]
     if replace_existing:
-        escaped_object_key = object_key.replace('\\', '\\\\').replace('"', '\\"')
-        collection.delete(f'knowledge_base_id == {knowledge_base_id} and object_key == "{escaped_object_key}"')
+        collection.delete(
+            f'knowledge_base_id == {knowledge_base_id} and object_key == "{_escape_object_key(object_key)}"'
+        )
         collection.flush()
     identifiers = [hashlib.sha256(f"{object_key}:{index}".encode()).hexdigest() for index in range(len(chunks))]
     collection.insert([identifiers, [knowledge_base_id] * len(chunks), [object_key] * len(chunks), chunks, embeddings])
     collection.flush()
+    # 新文档入库后必须让关键词索引失效，否则新内容在 BM25 里搜不到（最长要到缓存过期才可见）
+    _invalidate_keyword_corpus(knowledge_base_id)
 
 
-def retrieve_chunks(knowledge_base_id: int, query: str, limit: int) -> list[dict[str, object]]:
+def _invalidate_keyword_corpus(knowledge_base_id: int) -> None:
+    try:
+        from app.hybrid_search import invalidate_corpus
+
+        invalidate_corpus(knowledge_base_id)
+    except Exception:  # 缓存失效失败不该让入库/删除整体失败
+        pass
+
+
+def vector_search(
+    knowledge_base_id: int,
+    query: str,
+    limit: int,
+    document: str | None = None,
+) -> list[dict[str, object]]:
+    """纯向量检索（双编码器 + 内积）。
+
+    这是混合检索的一条腿，保留为独立函数是为了能单独对比两路召回的效果差异。
+
+    按文档过滤**下推到 Milvus 表达式**而不是取回后再筛：向量检索自带 top-k 截断，
+    先把候选截到 limit 再筛会让「某篇文档里的第 1 名」在全局排到 limit 之外时被丢掉，
+    过滤结果直接变空。过滤条件交给 Milvus，它会在候选集上先筛再算 top-k。
+    """
     from pymilvus import Collection, connections, utility
     from app.settings import settings
 
@@ -83,9 +249,117 @@ def retrieve_chunks(knowledge_base_id: int, query: str, limit: int) -> list[dict
         return []
     collection = Collection(COLLECTION_NAME)
     collection.load()
+    expression = f"knowledge_base_id == {knowledge_base_id}"
+    if document:
+        expression += f' and object_key == "{_escape_object_key(document)}"'
     results = collection.search([embed(query)], "embedding", {"metric_type": "IP", "params": {}}, limit=limit,
-                                expr=f"knowledge_base_id == {knowledge_base_id}", output_fields=["object_key", "content"])
-    return [{"document_object_key": hit.entity.get("object_key"), "content": hit.entity.get("content"), "score": hit.score} for hit in results[0]]
+                                expr=expression, output_fields=["object_key", "content"])
+    return [
+        {
+            "document_object_key": hit.entity.get("object_key"),
+            "content": hit.entity.get("content"),
+            "score": hit.score,
+            "retriever": "vector",
+        }
+        for hit in results[0]
+    ]
+
+
+def document_inventory(knowledge_base_id: int) -> dict[str, int]:
+    """列出该知识库已建索引的文档及其片段数，返回 ``{object_key: chunk 数}``。
+
+    只取 ``object_key`` 一个字段（不拉 content），所以即使知识库很大也很轻。
+    分页拉取是因为 Milvus 单次 query 有结果窗口上限，一次取不完会被静默截断 ——
+    截断的后果是「文档清单少了几篇」，这种错误不会报错，只会悄悄给出错的答案。
+
+    为什么不去读后端 ``knowledge_document`` 表拿更权威的文件名和状态：
+    ai-service 反查 backend 的表会造成双向依赖（backend 已经在调 ai-service），
+    而且 Agent 真正需要知道的是「哪些内容可被检索」，这恰好就是向量库里的东西。
+    代价是这里看不到「已上传但解析失败」的文档 —— 那属于后台文档管理页的职责。
+    """
+    from pymilvus import Collection, connections, utility
+    from app.settings import settings
+
+    connections.connect(alias="default", host=settings.milvus_host, port=str(settings.milvus_port))
+    if not utility.has_collection(COLLECTION_NAME):
+        return {}
+    collection = Collection(COLLECTION_NAME)
+    collection.load()
+
+    counts: dict[str, int] = {}
+    for row in iter_all_rows(collection, f"knowledge_base_id == {knowledge_base_id}", ["object_key"]):
+        key = str(row.get("object_key") or "")
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def document_preview_chunks(knowledge_base_id: int, document: str, limit: int) -> list[str]:
+    """取某篇文档的若干片段正文，供 Agent 判断「这篇文档大概讲什么」。
+
+    拿到的**不是「开头几段」，而是若干片段样本**：Milvus 的 ``query`` 不保证返回顺序，
+    而这里的主键是内容哈希（本身无序），所以顺序无从约束。这恰好够用 —— 每片正文开头
+    都带着切片时写入的小节标题前缀，抽几片就能看出这篇文档覆盖了哪些主题。
+
+    每篇文档发一次 ``limit`` 很小的 query，而不是把整个知识库的 content 拉回来再按
+    object_key 分组：后者在大知识库上会把全部正文读进内存，只为取几行预览。
+    """
+    from pymilvus import Collection, connections, utility
+    from app.settings import settings
+
+    if limit <= 0:
+        return []
+    connections.connect(alias="default", host=settings.milvus_host, port=str(settings.milvus_port))
+    if not utility.has_collection(COLLECTION_NAME):
+        return []
+    collection = Collection(COLLECTION_NAME)
+    collection.load()
+    rows = collection.query(
+        expr=f'knowledge_base_id == {knowledge_base_id} and object_key == "{_escape_object_key(document)}"',
+        output_fields=["content"],
+        limit=limit,
+    )
+    return [str(row.get("content") or "") for row in rows]
+
+
+def retrieve_chunks(
+    knowledge_base_id: int,
+    query: str,
+    limit: int,
+    mode: str | None = None,
+    document: str | None = None,
+    rewrite: bool | None = None,
+) -> list[dict[str, object]]:
+    """统一检索入口：默认走混合检索（向量 + BM25 + RRF + 重排）。
+
+    保留这个函数名是为了不打断既有调用方（问答、Agent）。想只要向量检索时传 ``mode="vector"``。
+
+    :param document: 只在该 object_key 的文档内检索；None 表示整个知识库
+    :param rewrite: 是否先用模型做查询改写（Multi-Query）。
+        ``None`` 表示按配置 ``query_rewrite_enabled`` 走；
+        Agent 的工具检索显式传 ``False`` —— 那条路径上查询是**模型自己写的**，
+        而且它会跨轮换措辞重试，本身已经在做多查询了，工具内部再套一层
+        等于每轮多打一次模型，收益却高度重叠。详见 ``app/query_rewrite``。
+    """
+    # 函数内导入：indexing 与 hybrid_search 互相依赖，模块级导入会形成循环。
+    from app.hybrid_search import hybrid_retrieve, multi_query_retrieve
+    from app.settings import settings
+
+    use_rewrite = (
+        bool(settings.query_rewrite_enabled) and bool(settings.chat_api_key)
+        if rewrite is None
+        else rewrite
+    )
+
+    try:
+        if use_rewrite:
+            return multi_query_retrieve(knowledge_base_id, query, limit, mode, document)
+        return hybrid_retrieve(knowledge_base_id, query, limit, mode, document)
+    except Exception:
+        # 混合检索依赖 BM25 语料加载，任一环节出问题都不能让问答整体失败 —— 退回纯向量。
+        import logging
+
+        logging.getLogger(__name__).warning("hybrid retrieval failed; falling back to vector search", exc_info=True)
+        return vector_search(knowledge_base_id, query, limit, document)
 
 
 def count_chunks(knowledge_base_ids: list[int]) -> int:

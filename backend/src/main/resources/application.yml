@@ -1,11 +1,30 @@
 spring:
   application:
     name: ai-knowledge-copilot
-  profiles:
-    default: default
+
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:ai_copilot}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai
+    username: ${MYSQL_USER:ai_copilot}
+    password: ${MYSQL_PASSWORD:change-me-app}
+    driver-class-name: com.mysql.cj.jdbc.Driver
 
   flyway:
-    enabled: false
+    enabled: true
+    locations: classpath:db/migration
+    validate-on-migrate: true
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      database: ${REDIS_DATABASE:0}
+      timeout: ${REDIS_TIMEOUT:2s}
+
+  servlet:
+    multipart:
+      # 默认值只有 1MB，企业 PDF/PPT 几乎必然超限；上传后由 ai-service 解析，这里放宽到 30MB。
+      max-file-size: ${UPLOAD_MAX_FILE_SIZE:30MB}
+      max-request-size: ${UPLOAD_MAX_REQUEST_SIZE:35MB}
 
 server:
   port: 8080
@@ -15,3 +34,36 @@ management:
     web:
       exposure:
         include: health,info
+
+storage:
+  minio:
+    enabled: true
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    access-key: ${MINIO_ROOT_USER:minioadmin}
+    secret-key: ${MINIO_ROOT_PASSWORD:change-me-minio}
+    bucket: ${MINIO_BUCKET:ai-copilot}
+
+ai-service:
+  enabled: ${AI_SERVICE_ENABLED:true}
+  base-url: ${AI_SERVICE_BASE_URL:http://localhost:8000}
+  # 与 ai-service 共享的内部 Token。两端都留空时校验关闭（本地开发）；
+  # 容器部署由 deploy/.env 注入，直接访问 8000 端口会被 401 拒绝。
+  internal-token: ${AI_SERVICE_INTERNAL_TOKEN:}
+
+# 限流阈值。login 挡的是密码爆破，ask 挡的是「按 token 计费」的 LLM 调用被刷。
+# 所有值都允许用环境变量覆盖，方便在不同环境（本地 / 演示 / 生产）用不同的松紧度。
+rate-limit:
+  login:
+    max-requests: ${RATE_LIMIT_LOGIN_MAX:5}
+    window: ${RATE_LIMIT_LOGIN_WINDOW:15m}
+  ask:
+    max-requests: ${RATE_LIMIT_ASK_MAX:20}
+    window: ${RATE_LIMIT_ASK_WINDOW:1m}
+  # 上传会触发解析 + Embedding（按 token 计费），也必须单独限流。
+  upload:
+    max-requests: ${RATE_LIMIT_UPLOAD_MAX:20}
+    window: ${RATE_LIMIT_UPLOAD_WINDOW:1m}
+  # 注册按 IP 计数，防批量撞库式建号；阈值给得比较宽，避免误伤团队共用出口 IP。
+  register:
+    max-requests: ${RATE_LIMIT_REGISTER_MAX:20}
+    window: ${RATE_LIMIT_REGISTER_WINDOW:1h}

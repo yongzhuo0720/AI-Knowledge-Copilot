@@ -1,8 +1,8 @@
 package com.aicopilot.knowledge;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
 import com.aicopilot.common.api.ApiResponse;
 import jakarta.validation.Valid;
-import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -17,19 +17,33 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import jakarta.servlet.http.HttpServletRequest;
 import com.aicopilot.user.AuthenticationInterceptor;
+import com.aicopilot.common.ratelimit.RateLimitProperties;
+import com.aicopilot.common.ratelimit.RateLimiter;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
 @RestController
 @RequestMapping("/api/v1/knowledge-bases")
-@Profile("local")
+@Tag(name = "知识库与问答", description = "知识库管理、文档上传、检索、问答与 Agent 任务")
 public class KnowledgeController {
 
-    private final KnowledgeService knowledgeService;
+    /** 检索也要调用 Embedding 接口，和问答共用一个「按 token 计费」的额度。 */
+    private static final String ASK_BUCKET = "ask";
+    private static final String UPLOAD_BUCKET = "upload";
 
-    public KnowledgeController(KnowledgeService knowledgeService) {
+    private final KnowledgeService knowledgeService;
+    private final RateLimiter rateLimiter;
+    private final RateLimitProperties rateLimitProperties;
+
+    public KnowledgeController(
+            KnowledgeService knowledgeService,
+            RateLimiter rateLimiter,
+            RateLimitProperties rateLimitProperties
+    ) {
         this.knowledgeService = knowledgeService;
+        this.rateLimiter = rateLimiter;
+        this.rateLimitProperties = rateLimitProperties;
     }
 
     @GetMapping
@@ -56,7 +70,9 @@ public class KnowledgeController {
             HttpServletRequest httpRequest,
             @Valid @RequestBody RegisterDocumentRequest request
     ) {
-        return ApiResponse.success(knowledgeService.registerDocument(authenticatedUserId(httpRequest), knowledgeBaseId, request));
+        Long userId = authenticatedUserId(httpRequest);
+        consumeQuota(UPLOAD_BUCKET, userId, rateLimitProperties.getUpload());
+        return ApiResponse.success(knowledgeService.registerDocument(userId, knowledgeBaseId, request));
     }
 
     @PostMapping(value = "/{knowledgeBaseId}/documents/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -69,9 +85,11 @@ public class KnowledgeController {
         if (file.isEmpty()) {
             throw new com.aicopilot.common.exception.BusinessException("EMPTY_FILE", "file must not be empty");
         }
+        Long userId = authenticatedUserId(httpRequest);
+        consumeQuota(UPLOAD_BUCKET, userId, rateLimitProperties.getUpload());
         String contentType = file.getContentType() == null ? "application/octet-stream" : file.getContentType();
         return ApiResponse.success(knowledgeService.uploadDocument(
-                authenticatedUserId(httpRequest), knowledgeBaseId,
+                userId, knowledgeBaseId,
                 file.getOriginalFilename(),
                 contentType,
                 file.getSize(),
@@ -122,7 +140,9 @@ public class KnowledgeController {
             HttpServletRequest httpRequest,
             @Valid @RequestBody KnowledgeSearchRequest request
     ) {
-        return ApiResponse.success(knowledgeService.search(authenticatedUserId(httpRequest), knowledgeBaseId, request));
+        Long userId = authenticatedUserId(httpRequest);
+        consumeQuota(ASK_BUCKET, userId, rateLimitProperties.getAsk());
+        return ApiResponse.success(knowledgeService.search(userId, knowledgeBaseId, request));
     }
 
     @PostMapping("/{knowledgeBaseId}/answer")
@@ -131,7 +151,9 @@ public class KnowledgeController {
             HttpServletRequest httpRequest,
             @Valid @RequestBody KnowledgeQuestionRequest request
     ) {
-        return ApiResponse.success(knowledgeService.answer(authenticatedUserId(httpRequest), knowledgeBaseId, request));
+        Long userId = authenticatedUserId(httpRequest);
+        consumeQuota(ASK_BUCKET, userId, rateLimitProperties.getAsk());
+        return ApiResponse.success(knowledgeService.answer(userId, knowledgeBaseId, request));
     }
 
     @PostMapping("/{knowledgeBaseId}/agents/knowledge")
@@ -140,12 +162,20 @@ public class KnowledgeController {
             HttpServletRequest httpRequest,
             @Valid @RequestBody KnowledgeQuestionRequest request
     ) {
-        return ApiResponse.success(knowledgeService.runAgent(
-                authenticatedUserId(httpRequest), knowledgeBaseId, request, List.of()
-        ));
+        Long userId = authenticatedUserId(httpRequest);
+        consumeQuota(ASK_BUCKET, userId, rateLimitProperties.getAsk());
+        return ApiResponse.success(knowledgeService.runAgent(userId, knowledgeBaseId, request, List.of()));
     }
 
     private Long authenticatedUserId(HttpServletRequest request) {
         return (Long) request.getAttribute(AuthenticationInterceptor.AUTHENTICATED_USER_ID);
+    }
+
+    /**
+     * 在 Controller 里扣配额，保证「未授权 / 参数错误」的请求也能先被拦住，
+     * 同时不把限流这种横切逻辑沉到 Service 里。
+     */
+    private void consumeQuota(String bucket, Long userId, RateLimitProperties.Policy policy) {
+        rateLimiter.consume(bucket, String.valueOf(userId), policy);
     }
 }

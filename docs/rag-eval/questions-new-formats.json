@@ -1,0 +1,97 @@
+{
+  "name": "新格式语料评估集（xlsx / pptx / csv / html，chunk 级判分）",
+  "description": "阶段三把文档解析从「markdown / 纯文本」扩到了 Excel / PPT / HTML / CSV / DOCX / PDF，但评估集一直只有 10 篇 .md —— 也就是说「新格式能不能进索引、进去之后能不能被检索到」从来没有量化验证过。这一集专门补上：语料是四种新格式各一份，全部由 docs/rag-eval/build_new_format_corpus.py 生成（标准库手写 OOXML，可读可 diff）。",
+  "judging": "和主评估集同一套口径（app/eval_judging.py，chunk 级双条件）。这里所有题目都用双条件，是因为新格式文档本身就短：一份 xlsx 只切出 2 片、csv 只切出 1 片，单串判分在这么小的语料上区分度不足，容易把「碰巧命中」也算成成功。",
+  "corpus": [
+    "gateway-capacity.xlsx",
+    "release-briefing.pptx",
+    "incident-tickets.csv",
+    "ops-runbook.html"
+  ],
+  "questions": [
+    {
+      "question": "XZ-8600 的最大并发连接数是多少",
+      "answer_span": ["8600", "120000"],
+      "kind": "table",
+      "expect_doc": "gateway-capacity.xlsx",
+      "note": "表格被切成了「一行一块」，每块自带列名（型号 / 最大并发连接数 / …）。这一题直接验证「表头有没有跟着数据一起进 chunk」—— 如果切片把表头和数据拆开，120000 这个数字就再也没法被问出来。"
+    },
+    {
+      "question": "XZ-8400 的整机功耗是多少瓦",
+      "answer_span": ["8400", "24 瓦"],
+      "kind": "table",
+      "expect_doc": "gateway-capacity.xlsx"
+    },
+    {
+      "question": "冗余电源的切换时间是多少",
+      "answer_span": ["冗余电源切换时间", "8 毫秒"],
+      "kind": "table",
+      "expect_doc": "gateway-capacity.xlsx",
+      "note": "事实在第二个工作表里。它验证「同一份 xlsx 的多个 sheet 都被解析到了」，而不是只读了第一个。"
+    },
+    {
+      "question": "整机待机功耗是多少",
+      "answer_span": ["整机待机功耗", "3 瓦"],
+      "kind": "table",
+      "expect_doc": "gateway-capacity.xlsx"
+    },
+    {
+      "question": "工单 INC-20260413 的处理时长是多少分钟",
+      "answer_span": ["INC-20260413", "185"],
+      "kind": "table",
+      "expect_doc": "incident-tickets.csv",
+      "note": "CSV 整份只切出 1 片，三行数据全在一片里 —— 换句话说这一题考的是「csv 有没有被解析并入库」，不是排序能力。"
+    },
+    {
+      "question": "故障码 E2051 出现在哪张更晚的工单里",
+      "answer_span": ["E2051", "INC-20260415"],
+      "kind": "table",
+      "expect_doc": "incident-tickets.csv"
+    },
+    {
+      "question": "INC-20260414 这张工单是谁处理的",
+      "answer_span": ["INC-20260414", "李工"],
+      "kind": "table",
+      "expect_doc": "incident-tickets.csv"
+    },
+    {
+      "question": "夜间交接班必须在几点之前完成设备清单核对",
+      "answer_span": ["交接班", "22:30"],
+      "kind": "webpage",
+      "expect_doc": "ops-runbook.html"
+    },
+    {
+      "question": "值班应急电话是多少",
+      "answer_span": ["值班应急电话", "4008-517-208"],
+      "kind": "webpage",
+      "expect_doc": "ops-runbook.html"
+    },
+    {
+      "question": "固件升级只允许在什么时间窗口执行",
+      "answer_span": ["固件升级", "每周三"],
+      "kind": "webpage",
+      "expect_doc": "ops-runbook.html",
+      "note": "同一份 HTML 的第三个 <h2> 小节。若解析器只取了第一个标题下的正文，这一题会 MISS。"
+    },
+    {
+      "question": "V16 版本的灰度批次代号是什么",
+      "answer_span": ["灰度批次代号", "R16-A"],
+      "kind": "slide",
+      "expect_doc": "release-briefing.pptx",
+      "note": "幻灯片分页成块：第一页是标题页，「灰度批次代号」在第二页 —— 这题验证多页都被解析到了。"
+    },
+    {
+      "question": "回滚条件里的错误率阈值是多少",
+      "answer_span": ["错误率", "千分之三"],
+      "kind": "slide",
+      "expect_doc": "release-briefing.pptx"
+    },
+    {
+      "question": "V16 版本引入了哪项新能力",
+      "answer_span": ["V16", "Multi-Query"],
+      "kind": "slide",
+      "expect_doc": "release-briefing.pptx",
+      "note": "「V16 版本发布说明」是幻灯片首页的标题，进的是 heading_path 前缀而不是块正文。这题同时钉住了「标题链有没有拼进 chunk」。"
+    }
+  ]
+}

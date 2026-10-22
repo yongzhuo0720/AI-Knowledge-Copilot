@@ -5,6 +5,7 @@ public record User(
         String username,
         String email,
         String passwordHash,
-        String status
+        String status,
+        boolean admin
 ) {
 }

@@ -5,6 +5,7 @@ import io.minio.MinioClient;
 import io.minio.BucketExistsArgs;
 import io.minio.MakeBucketArgs;
 import io.minio.PutObjectArgs;
+import io.minio.RemoveObjectArgs;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
@@ -35,6 +36,18 @@ public class MinioStorageService implements ObjectStorageService {
                     .build());
         } catch (Exception exception) {
             throw new BusinessException("STORAGE_UPLOAD_FAILED", "failed to upload object");
+        }
+    }
+
+    @Override
+    public void delete(String objectName) {
+        try {
+            minioClient.removeObject(RemoveObjectArgs.builder()
+                    .bucket(properties.getBucket())
+                    .object(objectName)
+                    .build());
+        } catch (Exception exception) {
+            throw new BusinessException("STORAGE_DELETE_FAILED", "failed to delete object");
         }
     }
 

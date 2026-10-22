@@ -7,7 +7,8 @@ public record AddWorkspaceMemberRequest(
         @NotNull(message = "userId must not be null")
         Long userId,
 
-        @Pattern(regexp = "OWNER|ADMIN|MEMBER", message = "role must be OWNER, ADMIN or MEMBER")
+        // OWNER 只能由「创建工作空间」自动产生，不通过成员接口分配。
+        @Pattern(regexp = "ADMIN|MEMBER", message = "role must be ADMIN or MEMBER")
         String role
 ) {
 

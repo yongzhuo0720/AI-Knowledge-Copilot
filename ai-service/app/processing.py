@@ -1,17 +1,20 @@
 import logging
 import time
-from io import BytesIO
-from threading import Lock
+from threading import Event, Lock, Thread
 from uuid import uuid4
 
-from app.indexing import index_chunks, split_text
+from app.chunking import chunk_document
+from app.document_blocks import extract_blocks
+from app.indexing import index_chunks
 from app.schemas import ParseDocumentRequest, ParseTaskResponse
 from app.settings import settings
+from app.storage import download_object
 from app.task_store import StoredTask, task_store
 
 _tasks: dict[str, ParseTaskResponse] = {}
 _tasks_lock = Lock()
 _document_locks: dict[str, Lock] = {}
+_document_lock_refs: dict[str, int] = {}
 _document_locks_guard = Lock()
 logger = logging.getLogger(__name__)
 
@@ -66,6 +69,65 @@ def retry_parse_task(task_id: str) -> ParseTaskResponse | None:
         return retried
 
 
+# 心跳间隔的下限。真实间隔取「stale 阈值的 1/4」与此值中的较大者：
+# 阈值默认 300s 时即每 75 秒续期一次，留出 4 倍余量去吸收网络抖动与时钟漂移。
+_MIN_HEARTBEAT_SECONDS = 5.0
+
+
+def _heartbeat_interval() -> float:
+    return max(_MIN_HEARTBEAT_SECONDS, settings.task_processing_stale_seconds / 4)
+
+
+class _TaskHeartbeat:
+    """在处理期间持续刷新任务的 ``updated_at``，声明「我还活着」。
+
+    没有它会发生什么：一个解析耗时超过 ``task_processing_stale_seconds`` 的大文档，
+    会被恢复循环的 ``find_recoverable`` 判成僵尸任务，然后**从零再做一遍** ——
+    重新下载、重新切片、重新调 embedding 接口，钱白花一倍，而且这是静默发生的，
+    只在「文档够大」时才暴露出来。
+
+    加上心跳之后，``updated_at`` 的语义从「最后一次状态变更」变成了
+    「最后一次存活上报」：只有真正挂掉的进程才会停止上报、才会被回收，
+    这正是僵尸检测想要的语义。
+
+    为什么必须是后台线程，而不是「在解析循环里顺手更新一下」：真正的耗时段是
+    ``index_chunks`` 内部的网络调用，中间没有任何可以让出来的位置，
+    所以只能靠一个独立线程按固定节奏上报。
+    """
+
+    def __init__(self, task_id: str) -> None:
+        self._task_id = task_id
+        self._stop = Event()
+        self._thread: Thread | None = None
+
+    def __enter__(self) -> "_TaskHeartbeat":
+        if not settings.task_store_enabled:
+            return self
+        self._thread = Thread(
+            target=self._beat,
+            name=f"task-heartbeat-{self._task_id[:8]}",
+            daemon=True,
+        )
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_exc_info: object) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5)
+
+    def _beat(self) -> None:
+        interval = _heartbeat_interval()
+        # Event.wait 既是「等待」也是「收到停止信号就立刻返回」，比 sleep 更干净：
+        # 任务提前结束时不用陪跑完一整个间隔。
+        while not self._stop.wait(interval):
+            try:
+                task_store.touch(self._task_id)
+            except Exception:
+                # 心跳失败不能反过来弄砸解析本身：真续不上期，就让僵尸检测照常兜底。
+                logger.warning("failed to heartbeat document processing task %s", self._task_id)
+
+
 def process_parse_task(task_id: str, request: ParseDocumentRequest | None = None) -> None:
     task = get_parse_task(task_id)
     if task is None:
@@ -81,37 +143,50 @@ def process_parse_task(task_id: str, request: ParseDocumentRequest | None = None
     if not _claim_task(task_id):
         return
 
-    document_lock = _document_lock(request.knowledge_base_id, request.object_key)
-    with document_lock:
-        while True:
-            task = get_parse_task(task_id) or task
-            _set_task(task_id, "PROCESSING", None, task.retry_count)
-            try:
-                content = _download_object(request.object_key)
-                text = _extract_text(content, request.content_type, request.filename)
-                chunks = split_text(text)
-                if not chunks:
-                    raise ValueError("document does not contain extractable text")
-                index_chunks(
-                    request.knowledge_base_id,
-                    request.object_key,
-                    chunks,
-                    request.replace_existing or recovered_processing or task.retry_count > 0,
-                )
-                _set_task(task_id, "COMPLETED", None, task.retry_count)
-                return
-            except Exception as exception:
-                next_retry_count = task.retry_count + 1
-                failure_reason = _failure_reason(exception)
-                if next_retry_count <= task.max_retries:
-                    _set_task(task_id, "RETRYING", failure_reason, next_retry_count)
-                    time.sleep(settings.task_retry_backoff_seconds * (2 ** (next_retry_count - 1)))
-                    if not _claim_task(task_id):
+    # 抢到任务的那一刻起，「我」就是这个任务的所有者，必须持续上报存活；
+    # 否则解析一旦超过 stale 阈值，恢复循环就会把我手上的任务再派一遍。
+    with _TaskHeartbeat(task_id):
+        document_lock = _document_lock(request.knowledge_base_id, request.object_key)
+        try:
+            with document_lock:
+                while True:
+                    task = get_parse_task(task_id) or task
+                    _set_task(task_id, "PROCESSING", None, task.retry_count)
+                    try:
+                        content = download_object(request.object_key)
+                        # 抽取与切片一步到位：结构信息必须从抽取阶段就带出来，
+                        # 否则切片只能在无结构的一长串字符上猜边界。详见 app/chunking.py
+                        chunks = chunk_document(
+                            content,
+                            request.content_type,
+                            request.filename,
+                            settings.chunk_size,
+                            settings.chunk_overlap,
+                        )
+                        if not chunks:
+                            raise ValueError("document does not contain extractable text")
+                        index_chunks(
+                            request.knowledge_base_id,
+                            request.object_key,
+                            chunks,
+                            request.replace_existing or recovered_processing or task.retry_count > 0,
+                        )
+                        _set_task(task_id, "COMPLETED", None, task.retry_count)
                         return
-                    continue
-                _set_task(task_id, "FAILED", failure_reason, task.retry_count)
-                logger.exception("document processing task failed: %s", task_id)
-                return
+                    except Exception as exception:
+                        next_retry_count = task.retry_count + 1
+                        failure_reason = _failure_reason(exception)
+                        if next_retry_count <= task.max_retries:
+                            _set_task(task_id, "RETRYING", failure_reason, next_retry_count)
+                            time.sleep(settings.task_retry_backoff_seconds * (2 ** (next_retry_count - 1)))
+                            if not _claim_task(task_id):
+                                return
+                            continue
+                        _set_task(task_id, "FAILED", failure_reason, task.retry_count)
+                        logger.exception("document processing task failed: %s", task_id)
+                        return
+        finally:
+            _release_document_lock(request.knowledge_base_id, request.object_key)
 
 
 def recover_parse_tasks() -> list[str]:
@@ -162,7 +237,22 @@ def _remember(task: ParseTaskResponse) -> None:
 def _document_lock(knowledge_base_id: int, object_key: str) -> Lock:
     lock_key = f"{knowledge_base_id}:{object_key}"
     with _document_locks_guard:
-        return _document_locks.setdefault(lock_key, Lock())
+        lock = _document_locks.setdefault(lock_key, Lock())
+        # 引用计数：同一个文档可能被多个任务并发处理，只有当最后一个使用者
+        # 释放后才能真正回收，否则会出现「等待旧锁 / 新建新锁」的竞态。
+        _document_lock_refs[lock_key] = _document_lock_refs.get(lock_key, 0) + 1
+        return lock
+
+
+def _release_document_lock(knowledge_base_id: int, object_key: str) -> None:
+    lock_key = f"{knowledge_base_id}:{object_key}"
+    with _document_locks_guard:
+        remaining = _document_lock_refs.get(lock_key, 0) - 1
+        if remaining <= 0:
+            _document_lock_refs.pop(lock_key, None)
+            _document_locks.pop(lock_key, None)
+        else:
+            _document_lock_refs[lock_key] = remaining
 
 
 def _to_stored(task: ParseTaskResponse) -> StoredTask:
@@ -200,32 +290,11 @@ def _failure_reason(exception: Exception) -> str:
     return f"{exception.__class__.__name__}: {message}"[:2000]
 
 
-def _download_object(object_key: str) -> bytes:
-    from minio import Minio
-
-    client = Minio(
-        settings.minio_endpoint,
-        access_key=settings.minio_access_key,
-        secret_key=settings.minio_secret_key,
-        secure=False,
-    )
-    response = client.get_object(settings.minio_bucket, object_key)
-    try:
-        return response.read()
-    finally:
-        response.close()
-        response.release_conn()
-
-
 def _extract_text(content: bytes, content_type: str, filename: str) -> str:
-    if content_type.startswith("text/") or filename.lower().endswith((".txt", ".md", ".csv")):
-        return content.decode("utf-8", errors="replace")
-    if content_type == "application/pdf" or filename.lower().endswith(".pdf"):
-        from pypdf import PdfReader
+    """把文档抽成一段纯文本。
 
-        return "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(content)).pages)
-    if content_type.endswith("wordprocessingml.document") or filename.lower().endswith(".docx"):
-        from docx import Document
-
-        return "\n".join(paragraph.text for paragraph in Document(BytesIO(content)).paragraphs)
-    raise ValueError(f"unsupported document type: {content_type}")
+    主路径是 :func:`app.document_blocks.extract_blocks`（结构化块），它才能被
+    结构感知切片器利用。这个函数是「只要平文本」的便捷入口，用于调试与既有调用方 ——
+    注意它**不保留**标题层级，所以不要用它来做切片。
+    """
+    return "\n".join(block.text for block in extract_blocks(content, content_type, filename))

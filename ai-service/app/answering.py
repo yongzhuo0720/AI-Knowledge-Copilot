@@ -9,8 +9,9 @@ def answer_question(
     knowledge_base_id: int,
     question: str,
     history: list[dict[str, str]] | None = None,
+    mode: str | None = None,
 ) -> dict[str, object]:
-    sources = retrieve_chunks(knowledge_base_id, question, 5)
+    sources = retrieve_chunks(knowledge_base_id, question, 5, mode)
     if not sources:
         return {"answer": "未在该知识库中找到可用资料。", "sources": []}
     context = "\n\n".join(f"[{index + 1}] {source['content']}" for index, source in enumerate(sources))
@@ -39,8 +40,9 @@ def stream_answer_question(
     knowledge_base_id: int,
     question: str,
     history: list[dict[str, str]] | None = None,
+    mode: str | None = None,
 ):
-    sources = retrieve_chunks(knowledge_base_id, question, 5)
+    sources = retrieve_chunks(knowledge_base_id, question, 5, mode)
     yield {"event": "sources", "data": {"sources": sources}}
     if not sources:
         yield {"event": "complete", "data": {"answer": "未在该知识库中找到可用资料。", "sources": []}}

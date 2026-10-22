@@ -1,11 +1,9 @@
 package com.aicopilot.user;
 
-import org.springframework.context.annotation.Profile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 @Service
-@Profile("local")
 public class UserService {
 
     private final UserRepository userRepository;
@@ -22,7 +20,8 @@ public class UserService {
                 request.username().trim(),
                 request.email().trim().toLowerCase(),
                 passwordEncoder.encode(request.password()),
-                "ACTIVE"
+                "ACTIVE",
+                false
         );
         return UserResponse.from(userRepository.save(user));
     }

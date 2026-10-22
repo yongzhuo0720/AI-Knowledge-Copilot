@@ -88,7 +88,7 @@ class MySqlTaskStore:
                 cursor.execute(
                     """
                     UPDATE document_processing_task
-                    SET status = 'PROCESSING'
+                    SET status = 'PROCESSING', updated_at = NOW()
                     WHERE task_id = %s
                       AND (
                           status IN ('ACCEPTED', 'RETRYING')
@@ -98,6 +98,27 @@ class MySqlTaskStore:
                     (task_id, settings.task_processing_stale_seconds),
                 )
                 return cursor.rowcount == 1
+        finally:
+            connection.close()
+
+    def touch(self, task_id: str) -> None:
+        """续期：把 updated_at 推进到现在，向其他实例声明「这个任务的所有者还活着」。
+
+        为什么要**显式**写 ``SET updated_at = NOW()``：建表时这一列带
+        ``ON UPDATE CURRENT_TIMESTAMP``，但这个特性只在「同一行里其他列的值真的
+        发生了变化」时才触发。解析过程中 status 一直是 PROCESSING、failure_reason
+        一直是 NULL、retry_count 也没动，``UPDATE ... SET status = 'PROCESSING'``
+        在 MySQL 眼里就是「没有任何变化」的空操作，时间戳压根不会前进。所以不能
+        指望 ON UPDATE 自动续期，必须显式赋值。
+        """
+        connection = self._connect()
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE document_processing_task SET updated_at = NOW() "
+                    "WHERE task_id = %s AND status = 'PROCESSING'",
+                    (task_id,),
+                )
         finally:
             connection.close()
 

@@ -1,0 +1,199 @@
+{
+  "name": "混合检索对比评估集（chunk 级，双条件判分）",
+  "description": "每条问题给定 answer_span —— 必须出现在正确片段里的字面串，可以是单个字符串或字符串数组（数组时要求全部出现）。语料见 corpus/，需上传下列 10 篇文档到同一个知识库。",
+  "judging": "两种判分写法。answer_span：单个字面串，或一组必须**同时出现**的字面串。加「同时出现」是为了堵住只认编号的漏洞——一篇只罗列型号的目录片段同样含 '2500'，却没回答「默认限流参数是多少」；'1836' 也会同时出现在完整条目和被切片截断的残句里。answer_any：一组备选，**任一**成立即算命中，用于处理「同一问题在语料里有两个都正确的片段」的情况，避免把题目歧义记成检索缺陷。",
+  "corpus": [
+    "db-error-code-catalog.md",
+    "gateway-model-catalog.md",
+    "release-history.md",
+    "db-tuning.md",
+    "hybrid-retrieval.md",
+    "db-errors-general.md",
+    "release-process.md",
+    "gateway-overview.md",
+    "index-basics.md",
+    "retrieval-overview.md"
+  ],
+  "questions": [
+    {
+      "question": "ERROR 1451 是什么原因导致的",
+      "answer_span": ["1451", "外键引用"],
+      "kind": "exact-code",
+      "expect_doc": "db-error-code-catalog.md",
+      "note": "错误码目录里有 50 个码，必须挑中写着 1451 的那一块"
+    },
+    {
+      "question": "ERROR 1215 报错怎么排查",
+      "answer_span": ["1215", "排序规则"],
+      "kind": "exact-code",
+      "expect_doc": "db-error-code-catalog.md"
+    },
+    {
+      "question": "ERROR 1062 唯一键重复怎么处理",
+      "answer_span": ["1062", "唯一键重复"],
+      "kind": "exact-code",
+      "expect_doc": "db-error-code-catalog.md"
+    },
+    {
+      "question": "ERROR 1045 访问被拒绝",
+      "answer_span": ["1045", "访问被拒绝"],
+      "kind": "exact-code",
+      "expect_doc": "db-error-code-catalog.md",
+      "note": "「访问被拒绝」这个词在通用流程文档里也出现，所以必须连编号一起要求"
+    },
+    {
+      "question": "ERROR 1205 锁等待超时怎么处理",
+      "answer_span": ["1205", "锁等待超时"],
+      "kind": "exact-code",
+      "expect_doc": "db-error-code-catalog.md"
+    },
+    {
+      "question": "ERROR 1213 检测到死锁",
+      "answer_span": ["1213", "检测到死锁"],
+      "kind": "exact-code",
+      "expect_doc": "db-error-code-catalog.md"
+    },
+    {
+      "question": "ERROR 1366 不正确的字符串值是什么原因",
+      "answer_span": ["1366", "字符集不匹配"],
+      "kind": "exact-code",
+      "expect_doc": "db-error-code-catalog.md"
+    },
+    {
+      "question": "ERROR 1406 数据过长",
+      "answer_span": ["1406", "列长度不足"],
+      "kind": "exact-code",
+      "expect_doc": "db-error-code-catalog.md"
+    },
+    {
+      "question": "ERROR 1071 索引键过长",
+      "answer_span": ["1071", "只索引前缀"],
+      "kind": "exact-code",
+      "expect_doc": "db-error-code-catalog.md"
+    },
+    {
+      "question": "ERROR 1836 读取表时列数不匹配",
+      "answer_span": ["1836", "表结构文件与数据文件不一致"],
+      "kind": "exact-code",
+      "expect_doc": "db-error-code-catalog.md",
+      "note": "1836 同时出现在完整条目和被截断的残句里，只认编号会误判"
+    },
+    {
+      "question": "XZ-7700 的限流阈值是多少",
+      "answer_span": ["7700", "单机限流阈值"],
+      "kind": "exact-code",
+      "expect_doc": "gateway-model-catalog.md",
+      "note": "型号目录里有 20 个型号，必须挑中 7700 那一块"
+    },
+    {
+      "question": "XZ-5500 每秒支持多少请求",
+      "answer_span": ["5500", "室内型网关"],
+      "kind": "exact-code",
+      "expect_doc": "gateway-model-catalog.md"
+    },
+    {
+      "question": "XZ-3300 是几网口的设备",
+      "answer_span": ["3300", "只提供单网口"],
+      "kind": "exact-code",
+      "expect_doc": "gateway-model-catalog.md"
+    },
+    {
+      "question": "XZ-9100 的突发桶容量是多少",
+      "answer_span": ["9100", "突发桶容量一万六千"],
+      "kind": "exact-code",
+      "expect_doc": "gateway-model-catalog.md"
+    },
+    {
+      "question": "XZ-2500 的默认限流参数",
+      "answer_span": ["2500", "每秒两百次"],
+      "kind": "exact-code",
+      "expect_doc": "gateway-model-catalog.md"
+    },
+    {
+      "question": "XZ-9500 的核心网关规格",
+      "answer_span": ["9500", "机架式核心网关"],
+      "kind": "exact-code",
+      "expect_doc": "gateway-model-catalog.md"
+    },
+    {
+      "question": "V7 迁移脚本叫什么名字",
+      "answer_span": "V7__add_user_admin_flag",
+      "kind": "exact-code",
+      "expect_doc": "release-history.md"
+    },
+    {
+      "question": "V8 迁移脚本做了什么改动",
+      "answer_span": "V8__add_source_retriever",
+      "kind": "exact-code",
+      "expect_doc": "release-history.md"
+    },
+    {
+      "question": "V12 版本加入了什么能力",
+      "answer_span": ["V12", "后台管理"],
+      "kind": "exact-code",
+      "expect_doc": "release-history.md"
+    },
+    {
+      "question": "V15 版本的改动是什么",
+      "answer_span": ["V15", "Agent 能力"],
+      "kind": "exact-code",
+      "expect_doc": "release-history.md"
+    },
+    {
+      "question": "外键约束冲突会让事务回滚吗",
+      "answer_any": [
+        ["整体回滚"],
+        ["约束类错误", "事务回滚"]
+      ],
+      "kind": "semantic",
+      "expect_doc": "db-error-code-catalog.md 或 db-errors-general.md",
+      "note": "答案在两处都成立：错误码手册的 1451 条目写「当前事务整体回滚」，通用流程文档写「多数约束类错误会导致当前事务回滚」。这是本项目第二次遇到「同一问题有多个正确片段」（第一次是「两路检索结果是怎么合并的」），说明纯语义题的判分默认就该接受多解，否则会把题目歧义记成检索缺陷。"
+    },
+    {
+      "question": "宽温型号的工作温度范围是多少",
+      "answer_span": ["宽温", "零下四十度到七十五度"],
+      "kind": "semantic",
+      "expect_doc": "gateway-model-catalog.md"
+    },
+    {
+      "question": "怎么定位慢查询",
+      "answer_span": "慢查询日志",
+      "kind": "semantic",
+      "expect_doc": "db-tuning.md"
+    },
+    {
+      "question": "连接池设置多大合适",
+      "answer_span": ["连接池", "过大会把数据库压垮"],
+      "kind": "semantic",
+      "expect_doc": "db-tuning.md"
+    },
+    {
+      "question": "RRF 融合为什么不用加权求和",
+      "answer_span": ["倒数排名融合", "不使用分数"],
+      "kind": "semantic",
+      "expect_doc": "hybrid-retrieval.md"
+    },
+    {
+      "question": "两路检索结果是怎么合并的",
+      "answer_any": [
+        ["名次", "不使用分数"],
+        ["名次", "倒数后相加"]
+      ],
+      "kind": "semantic",
+      "expect_doc": "hybrid-retrieval.md 或 retrieval-overview.md",
+      "note": "同一问题在语料里有两个都正确的片段，判分必须接受任一，否则会把题目歧义记成检索缺陷"
+    },
+    {
+      "question": "索引最左前缀原则是什么",
+      "answer_span": "最左前缀",
+      "kind": "semantic",
+      "expect_doc": "db-tuning.md"
+    },
+    {
+      "question": "覆盖索引为什么能变快",
+      "answer_span": ["覆盖索引", "不必回到主表取数据"],
+      "kind": "semantic",
+      "expect_doc": "index-basics.md"
+    }
+  ]
+}

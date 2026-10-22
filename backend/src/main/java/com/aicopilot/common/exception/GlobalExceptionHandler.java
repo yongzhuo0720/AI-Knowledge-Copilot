@@ -10,6 +10,9 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -26,6 +29,12 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.FORBIDDEN)
     public ApiResponse<Void> handleAccessDeniedException(AccessDeniedException exception) {
         return new ApiResponse<>("ACCESS_DENIED", exception.getMessage(), null);
+    }
+
+    @ExceptionHandler(RateLimitExceededException.class)
+    @ResponseStatus(HttpStatus.TOO_MANY_REQUESTS)
+    public ApiResponse<Void> handleRateLimitExceededException(RateLimitExceededException exception) {
+        return new ApiResponse<>("RATE_LIMIT_EXCEEDED", exception.getMessage(), null);
     }
 
     @ExceptionHandler(BusinessException.class)
@@ -54,6 +63,25 @@ public class GlobalExceptionHandler {
     @ResponseStatus(HttpStatus.METHOD_NOT_ALLOWED)
     public ApiResponse<Void> handleMethodNotSupported(HttpRequestMethodNotSupportedException exception) {
         return new ApiResponse<>("METHOD_NOT_ALLOWED", "request method is not supported", null);
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    @ResponseStatus(HttpStatus.PAYLOAD_TOO_LARGE)
+    public ApiResponse<Void> handleMaxUploadSizeExceeded(MaxUploadSizeExceededException exception) {
+        // 413 而不是 500：文件过大是客户端输入问题，不该被当成服务端故障。
+        return new ApiResponse<>("FILE_TOO_LARGE", "file exceeds the maximum upload size", null);
+    }
+
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ApiResponse<Void> handleMissingRequestPart(MissingServletRequestPartException exception) {
+        return new ApiResponse<>("MISSING_REQUEST_PART", exception.getRequestPartName() + " is required", null);
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    public ApiResponse<Void> handleUnreadableMessage(HttpMessageNotReadableException exception) {
+        return new ApiResponse<>("INVALID_REQUEST_BODY", "request body is missing or malformed", null);
     }
 
     @ExceptionHandler(Exception.class)

@@ -40,18 +40,22 @@ class RetrievalRequest(BaseModel):
     knowledge_base_id: int = Field(gt=0, validation_alias=AliasChoices("knowledge_base_id", "knowledgeBaseId"))
     query: str = Field(min_length=1, max_length=1000)
     limit: int = Field(default=5, ge=1, le=20)
+    # 检索模式：vector 纯向量 / keyword 纯 BM25 / hybrid 混合（不传则用服务端配置）
+    mode: str | None = Field(default=None, pattern="^(vector|keyword|hybrid)$")
 
 
 class RetrievalChunk(BaseModel):
     document_object_key: str
     content: str
     score: float
+    retriever: str | None = None
 
 
 class AnswerRequest(BaseModel):
     knowledge_base_id: int = Field(gt=0, validation_alias=AliasChoices("knowledge_base_id", "knowledgeBaseId"))
     question: str = Field(min_length=1, max_length=1000)
     history: list["ChatHistoryMessage"] = Field(default_factory=list, max_length=30)
+    mode: str | None = Field(default=None, pattern="^(vector|keyword|hybrid)$")
 
 
 class AgentRequest(AnswerRequest):

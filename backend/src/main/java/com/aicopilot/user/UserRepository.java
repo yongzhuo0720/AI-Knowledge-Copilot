@@ -5,4 +5,6 @@ public interface UserRepository {
     User save(User user);
 
     java.util.Optional<User> findByEmail(String email);
+
+    java.util.Optional<User> findById(Long id);
 }

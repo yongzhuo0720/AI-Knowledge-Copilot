@@ -38,13 +38,32 @@ const router = createRouter({
       name: 'settings',
       component: () => import('@/views/SettingsView.vue'),
     },
+    {
+      path: '/admin',
+      name: 'admin',
+      component: () => import('@/views/AdminView.vue'),
+    },
   ],
 })
 
+const PROTECTED_PATHS = ['/documents', '/chat', '/retrieval', '/agents', '/settings', '/admin']
+
+/** 从 localStorage 读当前登录用户。解析失败一律当未登录处理，不让坏数据把路由卡死。 */
+function readStoredUser(): { isAdmin?: boolean } | null {
+  const stored = localStorage.getItem('currentUser')
+  if (!stored) return null
+  try { return JSON.parse(stored) as { isAdmin?: boolean } } catch { return null }
+}
+
 router.beforeEach((to) => {
-  if ((to.path === '/documents' || to.path === '/chat' || to.path === '/retrieval' || to.path === '/agents' || to.path === '/settings') && !localStorage.getItem('accessToken')) {
-    return { path: '/knowledge' }
-  }
+  if (!PROTECTED_PATHS.includes(to.path)) return true
+  if (!localStorage.getItem('accessToken')) return { path: '/knowledge' }
+  // /admin 额外要求管理员身份。
+  //
+  // 真正的防线是后端的 AdminService.requireAdmin（非管理员一律 403），这里只是**纵深防御**：
+  // 光靠后端兜底的话，普通用户手输 /admin 会看到一页加载失败的空表格，
+  // 既浪费一次注定失败的请求，又把「这里有个后台」暴露给了不该看到的人。
+  if (to.path === '/admin' && !readStoredUser()?.isAdmin) return { path: '/' }
   return true
 })
 

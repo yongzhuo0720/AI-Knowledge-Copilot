@@ -5,7 +5,6 @@ services:
     container_name: ai-copilot-backend
     restart: unless-stopped
     environment:
-      SPRING_PROFILES_ACTIVE: local
       MYSQL_HOST: mysql
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_USER: ${MYSQL_USER}
@@ -15,6 +14,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       AI_SERVICE_BASE_URL: http://ai-service:8000
+      # 与 ai-service 共享的内部 Token；两端必须一致，否则所有 AI 调用都会被 401。
+      AI_SERVICE_INTERNAL_TOKEN: ${AI_SERVICE_INTERNAL_TOKEN}
     ports:
       - "8080:8080"
     healthcheck:
@@ -63,6 +64,8 @@ services:
       AI_SERVICE_TASK_PROCESSING_STALE_SECONDS: 300
       AI_SERVICE_CHAT_API_KEY: ${DEEPSEEK_API_KEY}
       AI_SERVICE_EMBEDDING_API_KEY: ${DASHSCOPE_API_KEY}
+      # 健康检查接口不校验 Token，其余接口必须带 X-Internal-Token。
+      AI_SERVICE_INTERNAL_TOKEN: ${AI_SERVICE_INTERNAL_TOKEN}
     depends_on:
       mysql:
         condition: service_healthy
@@ -80,7 +83,7 @@ services:
     ports:
       - "80:80"
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
       interval: 10s
       timeout: 5s
       retries: 12

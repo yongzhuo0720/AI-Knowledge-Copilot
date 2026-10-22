@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import logging
 from contextlib import asynccontextmanager
 
@@ -7,7 +8,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 import json
 
-from app.indexing import count_chunks, retrieve_chunks
+from app.indexing import count_chunks, delete_chunks, delete_knowledge_base_chunks, retrieve_chunks
 from app.answering import answer_question, stream_answer_question
 from app.agent import run_knowledge_agent
 from app.processing import get_parse_task, process_parse_task, recover_parse_tasks, retry_parse_task, submit_parse_task
@@ -16,6 +17,10 @@ from app.settings import settings
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    if not settings.internal_token:
+        logger.warning(
+            "AI_SERVICE_INTERNAL_TOKEN is not set; internal API authentication is DISABLED"
+        )
     recovery_task = asyncio.create_task(_recover_tasks_loop())
     try:
         yield
@@ -26,6 +31,25 @@ async def lifespan(application: FastAPI):
 
 app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
 logger = logging.getLogger(__name__)
+
+INTERNAL_TOKEN_HEADER = "X-Internal-Token"
+_PUBLIC_PATHS = frozenset({"/api/v1/health"})
+
+
+@app.middleware("http")
+async def require_internal_token(request: Request, call_next):
+    """除健康检查外，所有接口只允许持有内部 Token 的调用方（backend）访问。
+
+    健康检查必须放行：容器 healthcheck 不带业务凭证，也不该因为鉴权配置而误判服务已死。
+    Token 未配置时不做校验，这是为了让本地开发和测试不必先配环境变量；
+    生产环境漏配会在启动日志里看到明确警告，而不是静默裸奔。
+    """
+    expected = settings.internal_token
+    if expected and request.url.path not in _PUBLIC_PATHS:
+        provided = request.headers.get(INTERNAL_TOKEN_HEADER, "")
+        if not hmac.compare_digest(provided.encode("utf-8", "ignore"), expected.encode("utf-8")):
+            return JSONResponse(status_code=401, content={"detail": "invalid internal token"})
+    return await call_next(request)
 
 
 @app.exception_handler(RequestValidationError)
@@ -82,7 +106,46 @@ def search_knowledge(request: RetrievalRequest) -> dict[str, object]:
     return {
         "code": "0",
         "message": "success",
-        "data": retrieve_chunks(request.knowledge_base_id, request.query, request.limit),
+        "data": retrieve_chunks(request.knowledge_base_id, request.query, request.limit, request.mode),
+    }
+
+
+@app.post("/api/v1/retrieval/compare", response_model=dict[str, object])
+def compare_retrieval(request: RetrievalRequest) -> dict[str, object]:
+    """并排跑三种检索模式，用于对比召回效果（也是 RAG 评估集的取数接口）。"""
+    limit = request.limit
+    return {
+        "code": "0",
+        "message": "success",
+        "data": {
+            mode: retrieve_chunks(request.knowledge_base_id, request.query, limit, mode)
+            for mode in ("vector", "keyword", "hybrid")
+        },
+    }
+
+
+@app.delete("/api/v1/knowledge-bases/{knowledge_base_id}/index", response_model=dict[str, object])
+def delete_knowledge_base_index(knowledge_base_id: int) -> dict[str, object]:
+    """供 backend 在删除知识库前清理 Milvus 向量，幂等。"""
+    delete_knowledge_base_chunks(knowledge_base_id)
+    return {
+        "code": "0",
+        "message": "success",
+        "data": {"knowledge_base_id": knowledge_base_id, "deleted": True},
+    }
+
+
+@app.delete("/api/v1/knowledge-bases/{knowledge_base_id}/documents/index", response_model=dict[str, object])
+def delete_document_index(
+        knowledge_base_id: int,
+        object_key: str = Query(min_length=1, max_length=512),
+) -> dict[str, object]:
+    """供 backend 在删除单篇文档前清理 Milvus 向量，幂等。"""
+    delete_chunks(knowledge_base_id, object_key)
+    return {
+        "code": "0",
+        "message": "success",
+        "data": {"knowledge_base_id": knowledge_base_id, "object_key": object_key, "deleted": True},
     }
 
 
@@ -102,7 +165,11 @@ def retrieval_stats(knowledge_base_ids: str = Query(default="")) -> dict[str, ob
 @app.post("/api/v1/answers", response_model=dict[str, object])
 def answer_knowledge_question(request: AnswerRequest) -> dict[str, object]:
     history = [message.model_dump() for message in request.history]
-    return {"code": "0", "message": "success", "data": answer_question(request.knowledge_base_id, request.question, history)}
+    return {
+        "code": "0",
+        "message": "success",
+        "data": answer_question(request.knowledge_base_id, request.question, history, request.mode),
+    }
 
 
 @app.post("/api/v1/agents/knowledge", response_model=dict[str, object])
@@ -116,7 +183,7 @@ def stream_knowledge_question(request: AnswerRequest) -> StreamingResponse:
     history = [message.model_dump() for message in request.history]
 
     def events():
-        for item in stream_answer_question(request.knowledge_base_id, request.question, history):
+        for item in stream_answer_question(request.knowledge_base_id, request.question, history, request.mode):
             yield f"event: {item['event']}\ndata: {json.dumps(item['data'], ensure_ascii=False)}\n\n"
 
     return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

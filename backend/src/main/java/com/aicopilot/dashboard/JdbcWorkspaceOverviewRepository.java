@@ -1,6 +1,5 @@
 package com.aicopilot.dashboard;
 
-import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -9,7 +8,6 @@ import java.time.Instant;
 import java.util.List;
 
 @Repository
-@Profile("local")
 public class JdbcWorkspaceOverviewRepository implements WorkspaceOverviewRepository {
 
     private final JdbcTemplate jdbcTemplate;

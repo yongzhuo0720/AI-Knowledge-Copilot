@@ -52,9 +52,12 @@ MINIO_ROOT_USER=minioadmin
 MINIO_ROOT_PASSWORD=change-me-minio
 DEEPSEEK_API_KEY=
 DASHSCOPE_API_KEY=
+AI_SERVICE_INTERNAL_TOKEN=change-me-internal-token
 ```
 
 `DEEPSEEK_API_KEY` 用于回答生成，`DASHSCOPE_API_KEY` 用于 `text-embedding-v4` 向量生成。密钥为空时，AI Service 仍可启动，但真实模型调用无法完成。
+
+`AI_SERVICE_INTERNAL_TOKEN` 由 backend 与 ai-service 共享：ai-service 的除 `/api/v1/health` 外的全部接口都要求 `X-Internal-Token` 请求头。生成方式：`python -c "import secrets; print(secrets.token_urlsafe(32))"`，并保证 `.env` 中的值两端一致。留空会关闭校验（仅限本地开发），容器启动日志会给出明确警告。
 
 ## 端到端验证
 
@@ -62,8 +65,8 @@ DASHSCOPE_API_KEY=
 2. 注册或登录用户。
 3. 点击“一键创建”创建工作空间。
 4. 已有工作空间和知识库会在页面刷新后自动恢复，也可以通过下拉框切换。
-5. 创建知识库并上传 `.txt`、`.md`、`.csv`、`.pdf` 或 `.docx`。
-6. 点击“查询”，直到文档状态为 `COMPLETED`。
+5. 创建知识库并上传受支持的文档（TXT / MD / CSV / TSV / PDF / DOCX / XLSX / XLSM / PPTX / HTML）。
+6. 等待文档状态自动轮询到 `COMPLETED`（也可以手动点“查询”）。
 7. 点击“检索”确认返回片段和对象路径。
 8. 点击“生成回答”，确认回答非空且有来源引用。
 9. 点击“重新解析”，确认任务重新完成且仍可检索。
