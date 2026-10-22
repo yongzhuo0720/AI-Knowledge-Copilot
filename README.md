@@ -1,24 +1,33 @@
 # AI Knowledge Copilot
 
-面向团队的 AI 知识库与 RAG 问答平台：上传企业文档，自动解析并建立向量索引，通过自然语言检索和问答获取带引用的答案。
+面向团队的 AI 知识库与 RAG 问答平台：上传企业文档，自动解析并建立向量索引，通过混合检索和 Tool Calling Agent 获取带引用、可解释的答案。
 
 当前仓库对应 GitHub 项目：<https://github.com/yongzhuo0720/AI-Knowledge-Copilot>
 
-## 产品能力
+## 核心特性
 
-- 用户注册、登录和 Redis-backed Bearer Token 认证。
-- 工作空间、成员和知识库的权限隔离。
-- TXT、Markdown、CSV、PDF、DOCX 文档上传。
-- MinIO 保存原文件，MySQL 保存元数据和任务状态，Milvus 保存向量片段。
-- AI Service 持久化解析任务、失败原因、重试次数和任务参数。
-- 服务重启后自动恢复未完成任务，短暂异常自动重试。
-- 文档重新解析：删除旧向量，并使用当前 Embedding 模型重建索引。
-- 基于百炼 `text-embedding-v4` 的向量检索。
-- 基于 DeepSeek `deepseek-chat` 的回答生成。
-- 会话历史持久化，回答保存检索来源和引用对象。
-- Retrieval 调试工作台展示真实检索 Chunk、Score、Context、Prompt 和最终回答。
-- Knowledge Agent 通过真实 `knowledge_search` Tool Calling 检索当前知识库，再生成带引用回答和执行轨迹。
-- Vue 3 工作台：登录、注册、工作空间创建、上传、解析状态、检索和问答。
+**知识与检索**
+
+- 文档上传：TXT、Markdown、CSV、PDF、DOCX、XLSX、PPTX、HTML。
+- 解析流水线：MinIO 存原文件 → 文本提取（含 DOCX 表格、xlsx 工作表、pptx 幻灯片、HTML 正文）→ 结构感知切片 → Embedding → Milvus 向量索引。
+- 三路检索：向量（`text-embedding-v4`，1024 维）、BM25 关键词、混合（RRF 融合 + 标识符加法提权）。
+- 结构感知切片：每个 chunk 携带标题链前缀，纯向量 Hit@1 从 60.7% 提升到 78.6%；混合检索在 28 题评估集上 Hit@1 100%（口径见 `docs/检索效果评估报告.md`）。
+- 删除全链路：删除知识库/文档时同步清理 Milvus 向量、MinIO 对象与 MySQL 元数据，避免同名文档重新上传后检索到旧内容。
+- 解析任务可靠执行：MySQL 条件 UPDATE 乐观抢占、失败自动重试、服务重启后恢复未完成任务。
+
+**AI 问答与 Agent**
+
+- SSE 流式问答：实时生成，保留每个来源片段；停止生成时不写入残缺回答。
+- 知识库 Agent：模型决定调用 `knowledge_search` / `list_documents` / `document_outline` 工具，工具只访问服务端注入的知识库，返回带执行轨迹的可解释回答。
+- 检索调试工作台：并排运行向量 / 关键词 / 混合检索，展示命中片段、相似度、上下文组装与提示词预览。
+
+**平台与安全**
+
+- 注册登录、Redis Bearer Token（8 小时）；**Token 校验回查数据库**——账号封禁后旧 Token 立即失效。
+- 工作空间 / 成员 / 知识库三层权限隔离，授权 fail-closed；仅 OWNER 可管理空间与成员。
+- 所有触发模型调用的端点共用同一 Redis 限流配额，扣配额发生在鉴权之后、模型调用之前。
+- Backend ↔ AI Service 内部鉴权（共享 `AI_SERVICE_INTERNAL_TOKEN`），服务间调用不再裸奔。
+- 后台管理：用户封禁/删除（级联清理跨用户会话）、工作空间与知识库治理。
 
 ## 系统架构
 
@@ -30,18 +39,18 @@
                                     │ /api
                          ┌──────────▼───────────┐
                          │ Spring Boot Backend  │
-                         │ 认证 / 权限 / 会话   │
+                         │ 认证/权限/限流/编排   │
                          └──────┬───────┬───────┘
                                 │       │
                     ┌───────────▼──┐ ┌──▼───────────┐
                     │    MySQL     │ │    Redis     │
-                    │ 元数据/任务  │ │ Bearer Token │
+                    │ 元数据/任务  │ │ Token/限流   │
                     └──────────────┘ └──────────────┘
-                                │
+                                │ X-Internal-Token
                          ┌──────▼───────┐
                          │  AI Service   │
-                         │ 解析/Embedding│
-                         │ 检索/回答     │
+                         │ 解析/切片     │
+                         │ 检索/回答/Agent│
                          └──┬─────────┬──┘
                             │         │
                   ┌─────────▼──┐  ┌──▼─────────┐
@@ -50,31 +59,26 @@
                   └────────────┘  └────────────┘
 ```
 
+Java 层不直接调用模型：**一个 AI 能力 = 一个函数式接口 + 一个 lambda `@Bean`**（`AiServiceConfiguration.java`，全部带降级开关），真正的模型调用在 Python 侧完成。语言边界即服务边界。
+
 ## 目录结构
 
 ```text
 .
-├─ backend/       Spring Boot API、认证、权限、会话和业务编排
-├─ ai-service/    FastAPI 文档解析、Embedding、检索和回答服务
+├─ backend/       Spring Boot API、认证、权限、限流与会话编排
+├─ ai-service/    FastAPI 文档解析、切片、Embedding、检索、回答与 Agent
 ├─ frontend/      Vue 3 + TypeScript 工作台
 ├─ deploy/        Docker Compose、Nginx 和环境变量模板
-└─ docs/          架构、数据库、API 和开发说明
+├─ scripts/       端到端验证与契约探针（e2e_agent.py、verify_c_group.py）
+└─ docs/          架构审查、检索效果评估、API 与数据库说明
+    └─ rag-eval/  评估语料与题目集
 ```
 
 ## 快速启动：Docker Compose
 
 ### 1. 准备环境
 
-建议版本：
-
-| 工具 | 版本 |
-| --- | --- |
-| Docker Desktop | 4.x 或更高 |
-| Docker Compose | v2 |
-| Java | 21 |
-| Maven | 3.9.x |
-| Node.js | 22.x |
-| Python | 3.11 或 3.12 |
+建议版本：Docker Desktop 4.x、Compose v2、Java 21、Maven 3.9.x、Node.js 22.x、Python 3.11+。
 
 复制环境变量模板：
 
@@ -83,12 +87,7 @@ cd D:\ai_project\AI_agent
 Copy-Item deploy\.env.example deploy\.env
 ```
 
-编辑 `deploy/.env`，至少配置数据库、MinIO 凭据；如果要启用真实模型，再填入：
-
-```env
-DEEPSEEK_API_KEY=your-deepseek-key
-DASHSCOPE_API_KEY=your-dashscope-key
-```
+编辑 `deploy/.env`，至少配置数据库、MinIO 凭据；如果要启用真实模型，再填入 `DEEPSEEK_API_KEY` 与 `DASHSCOPE_API_KEY`。
 
 真实密钥只允许保存在本地 `deploy/.env`，不要写入 README、`.env.example`、代码或 Git。
 
@@ -97,15 +96,7 @@ DASHSCOPE_API_KEY=your-dashscope-key
 必须在仓库根目录执行，避免 Compose 找不到 `deploy/.env`：
 
 ```powershell
-cd D:\ai_project\AI_agent
 docker compose --env-file .\deploy\.env -f .\deploy\docker-compose.yml up --build -d
-```
-
-如果 Docker 不在 PATH，可指定 Docker Desktop 的完整路径：
-
-```powershell
-$dockerExe = "C:\Users\24774\AppData\Local\Programs\DockerDesktop\resources\bin\docker.exe"
-& $dockerExe compose --env-file .\deploy\.env -f .\deploy\docker-compose.yml up --build -d
 ```
 
 ### 3. 访问服务
@@ -113,285 +104,184 @@ $dockerExe = "C:\Users\24774\AppData\Local\Programs\DockerDesktop\resources\bin\
 | 服务 | 地址 |
 | --- | --- |
 | 前端工作台 | <http://localhost> |
-| 知识库页面 | <http://localhost/knowledge> |
 | Backend API | <http://localhost:8080> |
 | AI Service | <http://localhost:8000> |
-| MinIO API | <http://localhost:9000> |
 | MinIO Console | <http://localhost:9001> |
 | Milvus | `localhost:19530` |
 
-查看容器状态：
-
-```powershell
-docker compose --env-file .\deploy\.env -f .\deploy\docker-compose.yml ps
-```
-
-停止服务：
-
-```powershell
-docker compose --env-file .\deploy\.env -f .\deploy\docker-compose.yml down
-```
-
 ## 第一次使用
 
-1. 打开 <http://localhost/knowledge>。
-2. 点击“注册”，创建用户；已有用户直接登录。
-3. 登录后点击“一键创建”创建工作空间，页面会自动填入工作空间 ID。
-4. 创建知识库。
-5. 选择 `.txt`、`.md`、`.csv`、`.pdf` 或 `.docx` 文件并上传。
-6. 在“文档资产”区域点击“查询”，直到状态变成 `COMPLETED`。
-7. 在 AI 问答区域输入问题：
-   - “检索”查看命中的文本片段。
-   - “生成回答”调用模型生成答案。
-8. 检查回答底部的“来源”，确认返回文档对象路径。
-9. 对旧文档点击“重新解析”，验证旧向量删除后使用当前 Embedding 重建。
-
-## 文档处理流程
-
-```text
-浏览器选择文件
-  → Backend 上传到 MinIO
-  → MySQL 保存文档和处理任务
-  → AI Service 从 MinIO 下载并解析文本
-  → 文本切片 + Embedding
-  → Milvus 写入向量
-  → 检索返回片段和来源
-  → DeepSeek 根据片段生成回答
-```
-
-任务状态包括 `ACCEPTED`、`PROCESSING`、`COMPLETED`、`FAILED` 和 `RETRYING`。任务参数、失败原因、重试次数和状态保存在 MySQL，AI Service 重启后会恢复未完成任务。
+1. 打开 <http://localhost/knowledge>，注册并登录。
+2. 「一键创建」工作空间，再创建知识库。
+3. 上传文档（支持表格、演示文稿与网页格式），文档资产页每 5 秒自动轮询解析状态，直到 `COMPLETED`。
+4. **AI 会话**页：基于当前知识库提问，回答实时生成并保留引用来源；支持搜索、重命名、删除会话与停止生成。
+5. **知识库 Agent** 页：下达知识任务，查看执行轨迹（模型调了哪个工具、查了什么、命中多少片段）与最终回答。
+6. **设置 → 检索调试**：并排对比三种检索模式的召回差异，观察一次 RAG 的完整输入输出。
 
 ## 认证与权限
 
-注册和登录不需要 Bearer Token。工作空间、知识库和会话接口需要：
+注册和登录不需要 Token，其余接口需要：
 
 ```http
 Authorization: Bearer <access-token>
 ```
 
-权限规则：
-
-- 用户创建工作空间时，认证用户必须等于 `ownerUserId`。
-- 只有工作空间成员可以访问该空间下的知识库。
-- 只有 OWNER 或 ADMIN 可以管理工作空间成员。
-- 会话按 `knowledgeBaseId + userId` 隔离。
-- 缺少或无效 Token 返回 `401 AUTHENTICATION_REQUIRED`。
-- 非成员访问返回 `403 ACCESS_DENIED`。
-- 前端收到 `401` 会清理本地登录态，并自动回到登录入口。
-- 前端不会使用 `X-User-Id` 作为身份来源。
+- 用户必须创建或被加入工作空间；只有成员能访问该空间下的知识库与会话。
+- 授权 fail-closed：未显式判定的访问一律拒绝；非成员访问返回 `403 ACCESS_DENIED`。
+- 会话按 `knowledgeBaseId + userId` 隔离；删除用户时级联清理**其他成员**挂在其知识库下的会话。
+- 前端收到 `401` 清理本地登录态并回到登录入口，不使用 `X-User-Id` 作为身份来源。
 
 ## API 速查
 
 ### 用户与工作空间
 
-| 方法 | 路径 | 说明 | 认证 |
+| 方法 | 路径 | 说明 | 权限 |
 | --- | --- | --- | --- |
-| `POST` | `/api/v1/users` | 注册 | 否 |
-| `POST` | `/api/v1/users/login` | 登录并获取 Token | 否 |
-| `POST` | `/api/v1/workspaces` | 创建工作空间 | 是 |
-| `GET` | `/api/v1/workspaces` | 获取当前用户可访问的工作空间 | 是 |
-| `GET` | `/api/v1/workspaces/{workspaceId}/overview` | 获取 Workspace 统计、最近知识库、文档和会话 | 是 |
-| `GET` | `/api/v1/workspaces/{workspaceId}/documents` | 获取 Workspace 文档，可按文件名、状态和知识库筛选 | 是 |
-| `GET` | `/api/v1/workspaces/{workspaceId}/members` | 查看成员 | 是 |
-| `POST` | `/api/v1/workspaces/{workspaceId}/members` | 添加成员 | OWNER/ADMIN |
+| `POST` | `/api/v1/users` | 注册 | 公开 |
+| `POST` | `/api/v1/users/login` | 登录获取 Token | 公开 |
+| `POST` | `/api/v1/users/logout` | 撤销 Token | 登录 |
+| `GET` / `POST` | `/api/v1/workspaces` | 我的工作空间 / 创建工作空间 | 登录 |
+| `GET` | `/api/v1/workspaces/{id}/overview` | 空间统计、最近知识库/文档/会话 | 成员 |
+| `GET` | `/api/v1/workspaces/{id}/documents` | 空间文档，可按文件名、状态、知识库筛选 | 成员 |
+| `GET` / `POST` | `/api/v1/workspaces/{id}/members` | 查看 / 添加成员 | 查看：成员；添加：OWNER |
 
 ### 知识库与文档
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `POST` | `/api/v1/knowledge-bases` | 创建知识库 |
-| `GET` | `/api/v1/knowledge-bases?workspaceId={workspaceId}` | 获取工作空间下的知识库 |
-| `POST` | `/api/v1/knowledge-bases/{id}/documents/upload` | 上传文档 |
-| `GET` | `/api/v1/knowledge-bases/{id}/documents` | 获取文档列表 |
-| `GET` | `/api/v1/knowledge-bases/{id}/documents/{documentId}/processing-status` | 刷新解析状态 |
-| `POST` | `/api/v1/knowledge-bases/{id}/documents/{documentId}/reparse` | 删除旧向量并重新解析 |
-| `POST` | `/api/v1/knowledge-bases/{id}/documents/{documentId}/processing-retry` | 重试失败任务 |
-| `POST` | `/api/v1/knowledge-bases/{id}/search` | 检索知识片段 |
-| `POST` | `/api/v1/knowledge-bases/{id}/answer` | 直接生成回答 |
-| `POST` | `/api/v1/knowledge-bases/{id}/agents/knowledge` | 运行知识库 Agent 和 Tool Calling |
-| `POST` | `/api/v1/knowledge-bases/{id}/conversations/{sessionId}/agent-messages` | 在持久化会话中运行 Agent |
+| `GET` / `POST` | `/api/v1/knowledge-bases?workspaceId={id}` | 列表 / 创建 |
+| `POST` | `/api/v1/knowledge-bases/{id}/documents/upload` | 上传文档（multipart） |
+| `GET` | `/api/v1/knowledge-bases/{id}/documents` | 文档列表 |
+| `GET` | `.../documents/{documentId}/processing-status` | 刷新解析状态 |
+| `POST` | `.../documents/{documentId}/reparse` | 删旧向量并按当前模型重建 |
+| `POST` | `.../documents/{documentId}/processing-retry` | 重试失败任务 |
+| `DELETE` | `.../documents/{documentId}` | 删除单篇文档（向量/对象/元数据一并清理） |
+| `POST` | `/api/v1/knowledge-bases/{id}/search` | 检索（`mode=vector/keyword/hybrid`） |
+| `POST` | `/api/v1/knowledge-bases/{id}/answer` | 带引用的直接回答 |
 
-前端 `/retrieval` 页面会串联真实的检索和回答接口，用于观察一次 RAG 请求的输入、命中片段、上下文、Prompt 预览和回答引用。Embedding 卡片显示当前 `text-embedding-v4` 的 1024 维配置；原始向量不在浏览器展示。
-
-### 会话
+### 会话与 Agent
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `POST` | `/api/v1/knowledge-bases/{id}/conversations` | 创建会话 |
-| `GET` | `/api/v1/knowledge-bases/{id}/conversations?query={keyword}` | 当前用户会话列表，可按标题或消息搜索 |
-| `GET` | `/api/v1/knowledge-bases/{id}/conversations/{sessionId}/messages` | 获取消息和引用 |
-| `PATCH` | `/api/v1/knowledge-bases/{id}/conversations/{sessionId}` | 重命名当前用户会话 |
-| `DELETE` | `/api/v1/knowledge-bases/{id}/conversations/{sessionId}` | 删除当前用户会话及消息 |
-| `POST` | `/api/v1/knowledge-bases/{id}/conversations/{sessionId}/messages` | 提问并保存回答 |
-| `POST` | `/api/v1/knowledge-bases/{id}/conversations/{sessionId}/messages/stream` | SSE 流式提问并保存回答 |
+| `POST` / `GET` | `/api/v1/knowledge-bases/{id}/conversations` | 创建 / 搜索（`query` 按标题或消息）分页列表 |
+| `GET` | `.../conversations/{sessionId}/messages` | 消息分页（从最新往回数） |
+| `PATCH` / `DELETE` | `.../conversations/{sessionId}` | 重命名 / 删除当前用户的会话 |
+| `POST` | `.../conversations/{sessionId}/messages/stream` | SSE 流式问答 |
+| `POST` | `.../conversations/{sessionId}/agent-messages` | 运行 Agent，返回用户消息、助手消息（含执行轨迹） |
 
-流式接口返回 `text/event-stream`，事件顺序通常为 `user`、多个 `delta`、`sources`、`complete`。前端停止生成时会中断 HTTP 请求，未完成的助手回答不会写入会话历史。Docker Nginx 已关闭代理缓冲，避免 SSE 被网关聚合后一次性返回。
+流式接口返回 `text/event-stream`，事件顺序为 `user` → 多个 `delta` → `sources` → `complete`；Docker Nginx 已关闭代理缓冲。Agent 工具只访问服务端注入的知识库，失败收敛为四态 `ToolStatus`（`ok/empty/not_found/error`），只有 `knowledge_search` 的返回进入引用来源。
+
+### 后台管理
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/v1/admin/overview` · `/users` · `/workspaces` · `/knowledge-bases` | 概览与列表 |
+| `PATCH` | `/api/v1/admin/users/{userId}/status` · `/admin` | 封禁 / 授权管理员 |
+| `DELETE` | `/api/v1/admin/users/{userId}` | 删除用户（级联清理跨用户会话） |
+| `DELETE` | `/api/v1/admin/workspaces/{id}` · `/knowledge-bases/{id}` | 治理删除 |
 
 ### AI Service 内部接口
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `GET` | `/api/v1/health` | 健康检查 |
-| `POST` | `/api/v1/document-processing/tasks` | 创建解析任务 |
-| `GET` | `/api/v1/document-processing/tasks/{taskId}` | 查询任务 |
-| `POST` | `/api/v1/document-processing/tasks/{taskId}/retry` | 重试任务 |
-| `POST` | `/api/v1/retrieval/search` | 向量检索 |
-| `GET` | `/api/v1/retrieval/stats?knowledge_base_ids={ids}` | 查询 Milvus 已索引 Chunk 数 |
-| `POST` | `/api/v1/answers` | 模型回答 |
-| `POST` | `/api/v1/answers/stream` | SSE 流式模型回答 |
-| `POST` | `/api/v1/agents/knowledge` | Tool Calling 知识库 Agent |
+| `GET` | `/api/v1/health` | 健康检查（豁免内部鉴权） |
+| `POST` / `GET` | `/api/v1/document-processing/tasks[...]` | 解析任务创建 / 查询 / 重试 |
+| `POST` | `/api/v1/retrieval/search` | 向量 / 关键词 / 混合检索 |
+| `GET` | `/api/v1/retrieval/stats` | Milvus 已索引 Chunk 数 |
+| `DELETE` | `/api/v1/knowledge-bases/{id}/index` 等 | 索引清理（幂等） |
+| `POST` | `/api/v1/answers/stream` · `/agents/knowledge` | 流式回答 / Tool Calling Agent |
 
-AI Service 流式回答同样返回 `text/event-stream`，事件包括 `sources`、多个 `delta` 和 `complete`；异常由 Backend 统一转发为 `error` 事件。知识库 Agent 会调用 `knowledge_search` 工具，并返回 `steps` 执行轨迹、`sources` 引用来源和最终 `answer`。
+除健康检查外全部要求 `X-Internal-Token` 头（与 backend 共享 `AI_SERVICE_INTERNAL_TOKEN`）。
+
+## 检索质量评估
+
+检索改动不是拍脑袋：仓库带一套可复跑的评估体系（53 道题、2 个评估知识库，账号与构建脚本见 `docs/rag-eval/`）。
+
+| 评估集 | 规模 | 结果 |
+| --- | --- | --- |
+| 文本语料（10 篇 md → 44 chunk） | 28 题 + 12 道换说法题 | 混合检索 Hit@1 **100%**；纯向量 78.6%；纯关键词 85.7% |
+| 新格式语料（xlsx/pptx/csv/html → 10 chunk） | 13 题 | Recall@5 **13/13 全召回** |
+
+关键结论（完整口径与分析见 `docs/检索效果评估报告.md`）：
+
+- **切片升级**（标题链前缀打进 chunk）：纯向量 Hit@1 60.7% → 78.6%，语义分组 87.5% → 100%。
+- **加法提权而非全局重排**：弱重排器曾把 Hit@1 从 92.9% 拉到 89.3%；改为「无标识符时零干预」的加法提权后回到 100%，其余题目零退化。
+- **查询改写默认关闭**：混合检索已到评估集天花板；换说法题集上它救回了唯一漏召回的一题，但排序提升不可复现，不值得每题多一次模型调用。
+
+评估前必须先跑 `ai-service/scripts/verify_index.py`（索引计数一致 + 判分串字面命中），判分口径只有一份实现（`app/eval_judging.py`）。
 
 ## 配置说明
 
-Docker Compose 使用 `deploy/.env`：
+`deploy/.env` 关键变量：
 
-| 变量 | 作用 | 默认示例 |
-| --- | --- | --- |
-| `MYSQL_ROOT_PASSWORD` | MySQL root 密码 | `change-me-root` |
-| `MYSQL_DATABASE` | 业务数据库 | `ai_copilot` |
-| `MYSQL_USER` / `MYSQL_PASSWORD` | 业务数据库账号 | `ai_copilot` / `change-me-app` |
-| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | MinIO 凭据 | `minioadmin` / `change-me-minio` |
-| `DEEPSEEK_API_KEY` | DeepSeek 对话模型密钥 | 空 |
-| `DASHSCOPE_API_KEY` | 百炼 Embedding 密钥 | 空 |
+| 变量 | 作用 |
+| --- | --- |
+| `MYSQL_*` / `MINIO_*` | 数据库与对象存储凭据 |
+| `DEEPSEEK_API_KEY` | DeepSeek 对话模型密钥 |
+| `DASHSCOPE_API_KEY` | 百炼 Embedding 密钥 |
+| `AI_SERVICE_INTERNAL_TOKEN` | Backend ↔ AI Service 内部鉴权共享密钥 |
 
-AI Service 的任务参数在 Compose 中默认是：
-
-```env
-AI_SERVICE_TASK_STORE_ENABLED=true
-AI_SERVICE_TASK_MAX_RETRIES=3
-AI_SERVICE_TASK_RETRY_BACKOFF_SECONDS=2
-AI_SERVICE_TASK_RECOVERY_INTERVAL_SECONDS=5
-AI_SERVICE_TASK_PROCESSING_STALE_SECONDS=300
-```
+AI Service 任务参数（默认值见 `deploy/docker-compose.yml`）：`AI_SERVICE_TASK_MAX_RETRIES=3`、重试退避 2s、每 5s 恢复未完成任务。切片与检索参数集中在 `ai-service/app/settings.py`。
 
 ## 本地开发
 
-### Backend
-
 ```powershell
-mvn -s C:\Users\24774\.m2\settings.xml -f backend\pom.xml test
-```
+# Backend（需 MySQL/Redis/MinIO/Milvus/AI Service，建议直接用 Compose 基础设施）
+mvn -f backend/pom.xml test
 
-启动本地 Spring Boot 时需要 MySQL、Redis、MinIO、Milvus 和 AI Service；建议直接使用 Compose 基础设施。
-
-### AI Service
-
-```powershell
+# AI Service
 cd ai-service
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 pytest -q
-uvicorn app.main:app --reload --port 8000
-```
 
-### Frontend
-
-```powershell
+# Frontend（vitest 单测 + vue-tsc 类型检查构建）
 cd frontend
 npm ci
+npm run test
 npm run build
-npm run dev
 ```
-
-开发服务器默认地址为 <http://localhost:5173>，`/api` 会代理到 `http://localhost:8080`。
 
 ## 验证清单
 
-提交前建议执行：
+提交前建议全量跑三层测试（当前基线：后端 112、前端 79、ai-service 215 用例全绿）。部署后可运行：
 
 ```powershell
-cd backend
-mvn -s C:\Users\24774\.m2\settings.xml test
+# 端到端：注册 → 建空间 → 建库 → 上传 → 解析 → 问答 → 校验执行轨迹落库
+python scripts/e2e_agent.py
 
-cd ..\ai-service
-.\.venv\Scripts\python.exe -m pytest -q
+# 端点契约探针：分页契约、参数归一化、登录与 LLM 限流（33 项断言）
+python scripts/verify_c_group.py
 
-cd ..\frontend
-npm run build
-```
-
-Docker 端到端成功标准：
-
-- 注册或登录成功。
-- 能创建工作空间和知识库。
-- 上传文件后任务最终变为 `COMPLETED`。
-- 检索结果包含原文片段和对象路径。
-- AI 回答非空，并展示引用来源。
-- 重启 AI Service 后未完成任务能够恢复。
-- 失败任务展示失败原因并支持重试。
-- 重新解析后仍能检索到该文档。
-- Compose 状态中的核心服务为 `healthy`，前端再开始访问业务接口。
-
-也可以直接运行部署后的 API 冒烟验证：
-
-```powershell
-cd D:\ai_project\AI_agent
+# API 冒烟（模型密钥只从本地 deploy/.env 进入容器）
 powershell -ExecutionPolicy Bypass -File .\deploy\smoke-test.ps1
 ```
 
-脚本会自动创建临时账号和测试数据，并验证文档上传、解析、检索、回答和引用；模型密钥只从本地 `deploy/.env` 进入容器，不会写入脚本或 Git。
+Docker 端到端成功标准：注册/登录成功 → 创建空间与知识库 → 上传解析到 `COMPLETED` → 三种检索返回片段与对象路径 → 回答带引用 → Agent 返回执行轨迹 → 删除文档后检索不到旧内容 → 核心容器 `healthy`。
 
 ## 常见问题
 
-### `couldn't find env file`
+**`couldn't find env file`** —— 回到仓库根目录执行 compose 命令（相对路径基于当前目录）。
 
-Compose 的相对路径相对于当前终端目录。请回到仓库根目录执行：
+**登录返回 `401`** —— 项目没有默认账号，先注册；`401` 也可能是账号被封禁或 Token 过期（8 小时）。
 
-```powershell
-cd D:\ai_project\AI_agent
-docker compose --env-file .\deploy\.env -f .\deploy\docker-compose.yml up --build -d
-```
+**创建知识库返回 `403`** —— 当前用户不是目标工作空间成员；用「一键创建」或让 OWNER 添加成员。
 
-### 登录返回 `401`
+**文档一直不是 `COMPLETED`** —— `docker logs -f ai-copilot-ai-service` 查看解析日志；确认 MinIO/Milvus/MySQL 在运行、模型密钥无多余引号。失败任务会展示失败原因并支持重试。
 
-项目没有固定默认账号。先在 `/knowledge` 点击“注册”，再使用注册成功的邮箱和密码登录。若账号已存在，必须使用注册时的原密码。
-
-### 创建知识库返回 `403`
-
-当前用户必须是目标工作空间成员。推荐在登录后点击“一键创建”创建自己的工作空间；如果手动填写 ID，必须确认该用户已经加入对应工作空间。
-
-### 文档一直不是 `COMPLETED`
-
-查看 AI Service 日志和任务状态：
-
-```powershell
-docker logs -f ai-copilot-ai-service
-```
-
-同时确认 MinIO、Milvus、MySQL 均为运行状态，以及 `deploy/.env` 中的模型密钥没有多余引号或空格。
-
-### 页面没有更新
-
-重新构建前端容器并强制刷新浏览器：
-
-```powershell
-docker compose --env-file .\deploy\.env -f .\deploy\docker-compose.yml up --build -d frontend
-```
-
-然后使用 `Ctrl + F5` 刷新。
+**检索不到刚上传的内容** —— 确认解析状态为 `COMPLETED`；检索模式建议用 `hybrid`；纯向量对编号、型号、错误码这类字面量不敏感，混合检索靠 BM25 补齐。
 
 ## 数据与安全
 
-- `deploy/.env`、`.env`、模型密钥和本地数据不提交 Git。
-- 生产环境必须替换示例数据库和 MinIO 密码，并限制管理端口暴露范围。
-- 当前 Token 存储在 Redis，默认有效期为 8 小时。
-- Settings 页面可查看当前空间成员；OWNER/ADMIN 输入用户 ID 即可添加成员或更新其角色。
-- 生产环境建议接入 HTTPS、密钥管理服务、审计日志、限流和 Token 撤销机制。
-- MinIO、Milvus、MySQL、Redis 管理端口不应直接暴露到公网。
-
-## Git 提交约定
-
-每完成一个可验证的大步骤提交一次，提交前至少运行与改动相关的测试和 `git diff --check`。不要提交真实 API Key、数据库密码或运行时数据。
+- `deploy/.env`、模型密钥和本地数据不提交 Git。
+- 生产环境必须替换示例密码、接入 HTTPS 与密钥管理，并收紧 compose 中数据库/存储管理端口的暴露范围。
+- Token 存 Redis，默认 8 小时；封禁用户后旧 Token 立即失效（校验回查数据库）。
+- 建议生产环境补充审计日志、Token 撤销列表与更细粒度 RBAC。
 
 ## 后续规划
 
-- 完善工作空间选择器和成员管理页面。
-- 增加 API 集成测试和 Docker Compose 烟囱测试。
-- 增加文档预览、批量上传、解析进度和失败任务监控。
-- 增加会话搜索能力。
-- 增加更多受权限保护的 Agent 工具和执行历史。
-- 提供不含密钥的 Docker API 端到端冒烟脚本。
-- 增加生产环境部署、HTTPS、审计和细粒度 RBAC。
+- 单篇文档预览与解析进度条。
+- Agent 工具执行历史与更多受权限保护的工具。
+- 会话导出与跨知识库检索。
+- 生产部署方案（HTTPS、审计、细粒度 RBAC）。
