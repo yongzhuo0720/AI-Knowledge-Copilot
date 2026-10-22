@@ -347,6 +347,22 @@ export async function retryDocumentProcessing(
   return parseResponse<KnowledgeDocument>(response, '重试解析任务失败')
 }
 
+export async function deleteDocument(
+  userId: number,
+  knowledgeBaseId: number,
+  documentId: number,
+): Promise<void> {
+  const response = await fetch(`/api/v1/knowledge-bases/${knowledgeBaseId}/documents/${documentId}`, {
+    method: 'DELETE',
+    headers: userHeaders(),
+  })
+  if (!response.ok) {
+    if (response.status === 401) handleAuthenticationFailure()
+    const payload = await response.json().catch(() => null) as ApiResponse<unknown> | null
+    throw new Error(payload?.message ? `删除文档失败：${payload.message}` : `删除文档失败：${response.status}`)
+  }
+}
+
 export async function searchKnowledge(
   userId: number,
   knowledgeBaseId: number,

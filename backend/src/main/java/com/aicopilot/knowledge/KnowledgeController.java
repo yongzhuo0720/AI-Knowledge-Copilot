@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import jakarta.servlet.http.HttpServletRequest;
 import com.aicopilot.user.AuthenticationInterceptor;
 import com.aicopilot.common.ratelimit.RateLimitProperties;
@@ -120,6 +121,16 @@ public class KnowledgeController {
             HttpServletRequest httpRequest
     ) {
         return ApiResponse.success(knowledgeService.retryDocumentProcessing(authenticatedUserId(httpRequest), knowledgeBaseId, documentId));
+    }
+
+    @DeleteMapping("/{knowledgeBaseId}/documents/{documentId}")
+    public ApiResponse<Void> deleteDocument(
+            @PathVariable Long knowledgeBaseId,
+            @PathVariable Long documentId,
+            HttpServletRequest httpRequest
+    ) {
+        knowledgeService.deleteDocument(authenticatedUserId(httpRequest), knowledgeBaseId, documentId);
+        return ApiResponse.success(null);
     }
 
     @PostMapping("/{knowledgeBaseId}/search")

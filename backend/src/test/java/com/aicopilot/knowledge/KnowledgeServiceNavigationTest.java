@@ -26,7 +26,8 @@ class KnowledgeServiceNavigationTest {
                 mock(com.aicopilot.common.storage.ObjectStorageService.class),
                 mock(KnowledgeRetrievalClient.class),
                 mock(KnowledgeAnswerClient.class),
-                workspaceRepository
+                workspaceRepository,
+                mock(KnowledgeIndexClient.class)
         );
 
         assertThat(service.findKnowledgeBases(7L, 10L))

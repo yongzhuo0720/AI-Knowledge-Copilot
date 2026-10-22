@@ -18,6 +18,9 @@ import java.util.UUID;
 @Service
 public class KnowledgeService {
 
+    private static final org.slf4j.Logger logger =
+            org.slf4j.LoggerFactory.getLogger(KnowledgeService.class);
+
     /** 与 ai-service 的 document_blocks 解析能力保持一致。 */
     private static final Set<String> SUPPORTED_EXTENSIONS = Set.of(
             ".txt", ".md", ".csv", ".tsv",
@@ -32,6 +35,7 @@ public class KnowledgeService {
     private final KnowledgeRetrievalClient knowledgeRetrievalClient;
     private final KnowledgeAnswerClient knowledgeAnswerClient;
     private final WorkspaceRepository workspaceRepository;
+    private final KnowledgeIndexClient knowledgeIndexClient;
 
     @Autowired
     public KnowledgeService(
@@ -40,7 +44,8 @@ public class KnowledgeService {
             ObjectStorageService objectStorageService,
             KnowledgeRetrievalClient knowledgeRetrievalClient,
             KnowledgeAnswerClient knowledgeAnswerClient,
-            WorkspaceRepository workspaceRepository
+            WorkspaceRepository workspaceRepository,
+            KnowledgeIndexClient knowledgeIndexClient
     ) {
         this.knowledgeRepository = knowledgeRepository;
         this.documentProcessingClient = documentProcessingClient;
@@ -48,6 +53,7 @@ public class KnowledgeService {
         this.knowledgeRetrievalClient = knowledgeRetrievalClient;
         this.knowledgeAnswerClient = knowledgeAnswerClient;
         this.workspaceRepository = workspaceRepository;
+        this.knowledgeIndexClient = knowledgeIndexClient;
     }
 
     @Transactional
@@ -193,6 +199,32 @@ public class KnowledgeService {
         DocumentProcessingResponse task = documentProcessingClient.retry(document.processingTaskId());
         knowledgeRepository.updateProcessingStatus(document.id(), document.processingTaskId(), task.status());
         return KnowledgeDocumentResponse.from(withProcessingTask(document, document.processingTaskId(), task.status()), task);
+    }
+
+    /**
+     * 删除单篇文档：先清理派生存储（Milvus 向量、MinIO 对象），再删 MySQL 元数据。
+     *
+     * <p>顺序必须是「先派生、后元数据」：元数据一删就再也拿不到 object_key，
+     * 向量与对象会永久残留。两步清理都幂等，失败只记日志不阻塞删除（与
+     * {@code AdminService.deleteKnowledgeBase} 同一取舍），日志里保留坐标以便恢复后人工补偿。</p>
+     *
+     * <p>刻意不加 {@code @Transactional}：MySQL 侧只有一条自原子的 DELETE，
+     * 而向量/对象删除是远程调用，放进事务只会白白占着数据库连接。</p>
+     */
+    public void deleteDocument(Long userId, Long knowledgeBaseId, Long documentId) {
+        authorizeKnowledgeBase(knowledgeBaseId, userId);
+        KnowledgeDocument document = findDocument(knowledgeBaseId, documentId);
+        try {
+            knowledgeIndexClient.deleteDocumentIndex(knowledgeBaseId, document.objectKey());
+        } catch (RuntimeException exception) {
+            logger.warn("failed to delete vectors for document {} (object key {})", document.id(), document.objectKey(), exception);
+        }
+        try {
+            objectStorageService.delete(document.objectKey());
+        } catch (RuntimeException exception) {
+            logger.warn("failed to delete object {} for document {}", document.objectKey(), document.id(), exception);
+        }
+        knowledgeRepository.deleteDocument(document.id());
     }
 
     private KnowledgeDocument findDocument(Long knowledgeBaseId, Long documentId) {

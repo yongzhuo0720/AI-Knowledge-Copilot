@@ -20,4 +20,6 @@ public interface KnowledgeRepository {
     java.util.Optional<KnowledgeDocument> findDocument(Long knowledgeBaseId, Long documentId);
 
     void updateProcessingStatus(Long documentId, String processingTaskId, String status);
+
+    void deleteDocument(Long documentId);
 }

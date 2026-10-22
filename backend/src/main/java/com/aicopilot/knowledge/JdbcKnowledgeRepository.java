@@ -212,6 +212,11 @@ public class JdbcKnowledgeRepository implements KnowledgeRepository {
         );
     }
 
+    @Override
+    public void deleteDocument(Long documentId) {
+        jdbcTemplate.update("DELETE FROM knowledge_document WHERE id = ?", documentId);
+    }
+
     private Instant toInstant(Timestamp timestamp) {
         return timestamp == null ? null : timestamp.toInstant();
     }
