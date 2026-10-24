@@ -162,7 +162,19 @@ def delete_knowledge_base_chunks(knowledge_base_id: int) -> None:
     _invalidate_keyword_corpus(knowledge_base_id)
 
 
-def index_chunks(knowledge_base_id: int, object_key: str, chunks: list[str], replace_existing: bool = False) -> None:
+def index_chunks(
+    knowledge_base_id: int,
+    object_key: str,
+    chunks: list[str],
+    replace_existing: bool = False,
+    on_progress=None,
+) -> None:
+    """把切片写入 Milvus。
+
+    :param on_progress: 可选回调 ``on_progress(done, total)``，每完成一片
+        embedding 调用一次。解析任务用它把「正在生成向量」的进度报给前端；
+        其他调用方（重建索引脚本、检索链路）不传即可，零影响。
+    """
     from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, connections, utility
     from app.settings import settings
 
@@ -182,7 +194,12 @@ def index_chunks(knowledge_base_id: int, object_key: str, chunks: list[str], rep
     # 必须在 embed **之前**按字节切好：嵌入的必须正好是要入库的那份文本，
     # 否则向量和内容对不上（检索按截断后的内容命中，返回的却是另一段）。
     chunks = [part for chunk in chunks for part in split_oversized_content(chunk)]
-    embeddings = [embed(chunk) for chunk in chunks]
+    embeddings = []
+    total = len(chunks)
+    for done, chunk in enumerate(chunks, start=1):
+        embeddings.append(embed(chunk))
+        if on_progress is not None:
+            on_progress(done, total)
     if replace_existing:
         collection.delete(
             f'knowledge_base_id == {knowledge_base_id} and object_key == "{_escape_object_key(object_key)}"'

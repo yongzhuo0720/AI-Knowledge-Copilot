@@ -15,7 +15,38 @@ _tasks_lock = Lock()
 _document_locks: dict[str, Lock] = {}
 _document_lock_refs: dict[str, int] = {}
 _document_locks_guard = Lock()
+
+# ---- 解析阶段进度（内存态） ----
+# 进度是瞬时的 UI 状态：任务重启后本来就会从头重跑（恢复循环只认 ACCEPTED/PROCESSING），
+# 所以它不进 MySQL —— 任务表只保存有持久语义的状态机字段（status/retry_count/失败原因）。
+# 键为机器可读的阶段名，前端负责翻译文案；percent 取整数 0-100。
+_task_progress: dict[str, tuple[int, str]] = {}
+_task_progress_lock = Lock()
+
 logger = logging.getLogger(__name__)
+
+
+def _set_progress(task_id: str, percent: int, stage: str) -> None:
+    with _task_progress_lock:
+        _task_progress[task_id] = (percent, stage)
+
+
+def _clear_progress(task_id: str) -> None:
+    with _task_progress_lock:
+        _task_progress.pop(task_id, None)
+
+
+def _recorded_progress(task_id: str) -> tuple[int, str] | None:
+    with _task_progress_lock:
+        return _task_progress.get(task_id)
+
+
+def _merge_progress(task: ParseTaskResponse) -> ParseTaskResponse:
+    recorded = _recorded_progress(task.task_id)
+    if recorded is None or task.status in {"COMPLETED", "FAILED"}:
+        return task
+    percent, stage = recorded
+    return task.model_copy(update={"progress": percent, "stage": stage})
 
 
 def submit_parse_task(request: ParseDocumentRequest) -> ParseTaskResponse:
@@ -41,12 +72,15 @@ def get_parse_task(task_id: str) -> ParseTaskResponse | None:
         if stored is not None:
             task = _from_stored(stored)
             _remember(task)
-            return task
+            return _merge_progress(task)
     with _tasks_lock:
-        return _tasks.get(task_id)
+        task = _tasks.get(task_id)
+    return _merge_progress(task) if task is not None else None
 
 
 def retry_parse_task(task_id: str) -> ParseTaskResponse | None:
+    # 重试会让解析从头跑一遍，上一轮残留的进度必须清掉，否则界面会短暂显示假进度。
+    _clear_progress(task_id)
     if settings.task_store_enabled:
         stored = task_store.retry(task_id)
         if stored is None:
@@ -151,8 +185,10 @@ def process_parse_task(task_id: str, request: ParseDocumentRequest | None = None
                 while True:
                     task = get_parse_task(task_id) or task
                     _set_task(task_id, "PROCESSING", None, task.retry_count)
+                    _set_progress(task_id, 5, "claimed")
                     try:
                         content = download_object(request.object_key)
+                        _set_progress(task_id, 25, "downloaded")
                         # 抽取与切片一步到位：结构信息必须从抽取阶段就带出来，
                         # 否则切片只能在无结构的一长串字符上猜边界。详见 app/chunking.py
                         chunks = chunk_document(
@@ -164,17 +200,25 @@ def process_parse_task(task_id: str, request: ParseDocumentRequest | None = None
                         )
                         if not chunks:
                             raise ValueError("document does not contain extractable text")
+                        _set_progress(task_id, 45, "chunked")
                         index_chunks(
                             request.knowledge_base_id,
                             request.object_key,
                             chunks,
                             request.replace_existing or recovered_processing or task.retry_count > 0,
+                            # embedding 是流水线里最长的一段，逐片上报：
+                            # 进度在 50-90 之间随完成片数推进，给用户真实的等待预期。
+                            on_progress=lambda done, total: _set_progress(
+                                task_id, 50 + int(40 * done / max(total, 1)), "embedding"
+                            ),
                         )
+                        _clear_progress(task_id)
                         _set_task(task_id, "COMPLETED", None, task.retry_count)
                         return
                     except Exception as exception:
                         next_retry_count = task.retry_count + 1
                         failure_reason = _failure_reason(exception)
+                        _clear_progress(task_id)
                         if next_retry_count <= task.max_retries:
                             _set_task(task_id, "RETRYING", failure_reason, next_retry_count)
                             time.sleep(settings.task_retry_backoff_seconds * (2 ** (next_retry_count - 1)))

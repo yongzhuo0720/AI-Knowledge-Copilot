@@ -61,7 +61,7 @@ def test_processing_task_completes_after_extracting_and_indexing(monkeypatch) ->
     )
     task = submit_parse_task(request)
     monkeypatch.setattr("app.processing.download_object", lambda _: "团队知识库内容".encode())
-    monkeypatch.setattr("app.processing.index_chunks", lambda *args: None)
+    monkeypatch.setattr("app.processing.index_chunks", lambda *args, **kwargs: None)
 
     process_parse_task(task.task_id, request)
 
@@ -194,7 +194,7 @@ def test_processing_keeps_the_task_fresh_through_a_slow_index(monkeypatch) -> No
 
     indexed: list[object] = []
 
-    def slow_index(*args: object) -> None:
+    def slow_index(*args: object, **kwargs: object) -> None:
         # 模拟「切片多、embedding 慢」：耗时远超心跳间隔。
         deadline = time.monotonic() + 0.15
         while time.monotonic() < deadline:
@@ -214,3 +214,47 @@ def test_processing_keeps_the_task_fresh_through_a_slow_index(monkeypatch) -> No
     assert store.beats, "解析期间没有发出任何心跳"
     assert set(store.beats) == {task.task_id}
     assert store.get(task.task_id).status == "COMPLETED"
+
+
+def test_reports_stage_progress_and_clears_it_on_terminal_state(monkeypatch) -> None:
+    """进度随解析阶段推进、embedding 逐片上报、终态后清空。
+
+    进度只活在内存里（合并进任务响应），前端靠它画进度条；
+    终态清空是为了让界面切回按 status 展示，不读到过期的中间值。
+    """
+    store = _InMemoryStore()
+    monkeypatch.setattr("app.processing.task_store", store)
+    monkeypatch.setattr("app.processing.settings.task_store_enabled", True)
+    monkeypatch.setattr("app.processing.download_object", lambda _: "团队知识库内容".encode())
+    monkeypatch.setattr("app.processing.chunk_document", lambda *args, **kwargs: ["切片一", "切片二"])
+
+    observed: list[tuple[object, object]] = []
+
+    def fake_index(*args: object, on_progress=None, **kwargs: object) -> None:
+        def snapshot() -> tuple[object, object]:
+            current = get_parse_task(task.task_id)
+            return (current.progress, current.stage)
+
+        observed.append(snapshot())
+        if on_progress is not None:
+            on_progress(1, 2)
+            observed.append(snapshot())
+            on_progress(2, 2)
+            observed.append(snapshot())
+
+    monkeypatch.setattr("app.processing.index_chunks", fake_index)
+
+    request = ParseDocumentRequest(
+        object_key="kb/20/guide.txt", filename="guide.txt", content_type="text/plain", knowledge_base_id=20
+    )
+    task = submit_parse_task(request)
+    process_parse_task(task.task_id, request)
+
+    # 进入 index_chunks 前是 chunked(45)；embedding 随完成片数在 50-90 推进
+    assert observed[0] == (45, "chunked")
+    assert observed[1] == (70, "embedding")
+    assert observed[2] == (90, "embedding")
+
+    final = get_parse_task(task.task_id)
+    assert final.status == "COMPLETED"
+    assert final.progress is None and final.stage is None
