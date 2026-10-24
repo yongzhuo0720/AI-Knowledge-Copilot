@@ -58,8 +58,11 @@ services:
       AI_SERVICE_MYSQL_USER: ${MYSQL_USER}
       AI_SERVICE_MYSQL_PASSWORD: ${MYSQL_PASSWORD}
       AI_SERVICE_TASK_STORE_ENABLED: "true"
-      AI_SERVICE_TASK_MAX_RETRIES: 3
-      AI_SERVICE_TASK_RETRY_BACKOFF_SECONDS: 2
+      # 重试预算要覆盖「一次依赖冷启动」：指数退避 3s/6s/12s/24s/48s ≈ 93s，
+      # 而 Milvus standalone 从冷启动到 healthy 实测约 60-70s。此前 3 次 × 2s（共 14s）
+      # 在「daemon 刚启动就上传文档」的场景下必然把任务判 FAILED（2026-10-24 e2e 实测）。
+      AI_SERVICE_TASK_MAX_RETRIES: 5
+      AI_SERVICE_TASK_RETRY_BACKOFF_SECONDS: 3
       AI_SERVICE_TASK_RECOVERY_INTERVAL_SECONDS: 5
       AI_SERVICE_TASK_PROCESSING_STALE_SECONDS: 300
       AI_SERVICE_CHAT_API_KEY: ${DEEPSEEK_API_KEY}
@@ -147,6 +150,9 @@ services:
   etcd:
     image: quay.io/coreos/etcd:v3.5.18
     container_name: ai-copilot-etcd
+    # 与其他服务一致的自启策略：Docker daemon 重启后 etcd 必须自己回来，
+    # 否则 milvus 连不上元数据服务会陷入崩溃循环（2026-10-24 实测复现）。
+    restart: unless-stopped
     environment:
       ETCD_AUTO_COMPACTION_MODE: revision
       ETCD_AUTO_COMPACTION_RETENTION: 1000
@@ -192,6 +198,8 @@ services:
   milvus-minio:
     image: minio/minio:latest
     container_name: ai-copilot-milvus-minio
+    # 同上：milvus 的对象存储依赖，daemon 重启后必须自启。
+    restart: unless-stopped
     command: minio server /minio_data
     volumes:
       - milvus-minio-data:/minio_data
