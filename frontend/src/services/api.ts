@@ -46,6 +46,10 @@ export interface KnowledgeDocument {
   createdAt: string
   processingFailureReason?: string | null
   processingRetryCount?: number
+  /** 解析中的瞬时阶段（机器键，前端翻译文案）；终态/未知为 null */
+  processingStage?: string | null
+  /** 解析进度 0-100；仅解析中有值 */
+  processingProgress?: number | null
 }
 
 export interface WorkspaceDocument {
@@ -61,6 +65,21 @@ export interface WorkspaceDocument {
   createdAt: string
   processingFailureReason?: string | null
   processingRetryCount?: number
+  processingStage?: string | null
+  processingProgress?: number | null
+}
+
+export interface DocumentPreviewSection {
+  titlePath: string[]
+  blocks: string[]
+}
+
+export interface DocumentPreview {
+  name: string
+  sectionCount: number
+  blockCount: number
+  truncated: boolean
+  sections: DocumentPreviewSection[]
 }
 
 /** 检索模式：vector 纯向量 / keyword 纯 BM25 关键词 / hybrid 双路融合（默认） */
@@ -327,6 +346,21 @@ export async function reparseDocument(
     { method: 'POST', headers: userHeaders() },
   )
   return parseResponse<KnowledgeDocument>(response, '重新解析文档失败')
+}
+
+/**
+ * 单篇文档预览：按小节返回原文结构化内容。
+ * ai-service 会重新下载原文做结构化抽取，大文档可能有秒级延迟，调用方要自己给 loading。
+ */
+export async function previewDocument(
+  knowledgeBaseId: number,
+  documentId: number,
+): Promise<ApiResponse<DocumentPreview>> {
+  const response = await fetch(
+    `/api/v1/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/preview`,
+    { headers: userHeaders() },
+  )
+  return parseResponse<DocumentPreview>(response, '获取文档预览失败')
 }
 
 export async function retryDocumentProcessing(
