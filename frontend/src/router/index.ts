@@ -43,6 +43,11 @@ const router = createRouter({
       name: 'admin',
       component: () => import('@/views/AdminView.vue'),
     },
+    {
+      // 兜底：未注册的路径一律回到总览，避免侧栏在、主区空白的「假死页」。
+      path: '/:pathMatch(.*)*',
+      redirect: '/',
+    },
   ],
 })
 

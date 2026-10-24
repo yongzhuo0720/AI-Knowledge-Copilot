@@ -196,7 +196,7 @@ onMounted(async () => {
           <div class="knowledge-next-steps">
             <button class="next-step-card" type="button" @click="router.push('/documents')"><strong>文档资产</strong><span>上传资料、跟踪解析状态、删除文档</span></button>
             <button class="next-step-card" type="button" @click="router.push('/chat')"><strong>AI 问答</strong><span>基于知识库的流式对话，回答自带引用</span></button>
-            <button class="next-step-card" type="button" @click="router.push('/agent')"><strong>Agent 模式</strong><span>模型自主调用工具，并展示执行轨迹</span></button>
+            <button class="next-step-card" type="button" @click="router.push('/agents')"><strong>Agent 模式</strong><span>模型自主调用工具，并展示执行轨迹</span></button>
           </div>
           <div class="content-utility"><button class="ghost-button" type="button" @click="signOut">退出登录</button></div>
         </div><div v-else class="empty-state large-empty"><span class="empty-icon" v-html="SPARK_ICON" /><strong>你的知识库会显示在这里</strong><span>完成左侧设置后，就可以上传文档并开始提问。</span></div>

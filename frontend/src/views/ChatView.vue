@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import {
   createConversation,
@@ -65,6 +65,25 @@ const lastQuestion = ref('')
 const streaming = ref(false)
 const loading = ref(false)
 const message = ref('')
+
+// ---- 消息区滚动 ----
+// 流式生成时内容持续增长，聊天界面必须自己跟上，否则用户看到的永远是开头几行。
+// 但自动滚动只在用户自己停在底部附近时生效：向上翻历史时强拉到底会打断阅读。
+const chatMessagesRef = ref<HTMLElement | null>(null)
+const autoScroll = ref(true)
+
+/** 滚动位置贴近底部时保持自动跟随；用户向上离开底部则交还控制权。 */
+function onMessagesScroll() {
+  const el = chatMessagesRef.value
+  if (!el) return
+  autoScroll.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+}
+
+async function stickToBottom() {
+  await nextTick()
+  const el = chatMessagesRef.value
+  if (el && autoScroll.value) el.scrollTop = el.scrollHeight
+}
 const editingSessionId = ref<number | null>(null)
 const editingTitle = ref('')
 const sessionActionLoading = ref(false)
@@ -161,6 +180,9 @@ async function loadSessionMessages(session: ConversationSession) {
     lastQuestion.value = latestUser?.content ?? ''
     const latestAssistant = [...messages.value].reverse().find((item) => item.role === 'ASSISTANT')
     sources.value = latestAssistant?.sources ?? []
+    // 换会话是全新视角：无论上次把自动滚动关没关，这屏都从最新消息开始看。
+    autoScroll.value = true
+    await stickToBottom()
   } catch (error) {
     if (requestId === messageRequestId) message.value = error instanceof Error ? error.message : '加载消息失败'
   }
@@ -172,6 +194,10 @@ async function loadEarlierMessages() {
   loadingEarlierMessages.value = true
   const requestId = messageRequestId
   const forSessionId = sessionId.value
+  // 往顶部插入更早的消息会让 scrollHeight 变大；不校正 scrollTop 的话，
+  // 浏览器会把当前看到的那条消息「推下去」，阅读位置就跳走了。
+  const previousHeight = chatMessagesRef.value?.scrollHeight ?? 0
+  const previousTop = chatMessagesRef.value?.scrollTop ?? 0
   try {
     const nextPage = messagePage.value + 1
     const response = await listConversationMessages(
@@ -185,6 +211,9 @@ async function loadEarlierMessages() {
     messages.value = [...response.data.items.filter((item) => !known.has(item.id)), ...messages.value]
     messagePage.value = nextPage
     hasMoreMessages.value = response.data.hasNext
+    await nextTick()
+    const el = chatMessagesRef.value
+    if (el) el.scrollTop = previousTop + el.scrollHeight - previousHeight
   } catch (error) {
     message.value = error instanceof Error ? error.message : '加载更早的消息失败'
   } finally {
@@ -280,6 +309,8 @@ async function send() {
         sources.value = event.data.assistantMessage.sources
       }
       if (event.event === 'error') message.value = event.data.message
+      // user/delta/complete 都会让消息区长高；停在底部附近就跟着走，翻历史时不打扰。
+      if (event.event === 'user' || event.event === 'delta' || event.event === 'complete') void stickToBottom()
     })
     await refreshFirstPage()
   } catch (error) {
@@ -359,7 +390,7 @@ onBeforeUnmount(() => {
     <section v-if="!activeKnowledgeBase" class="chat-empty panel"><strong>先选择一个知识库</strong><span>创建知识库并上传文档后，AI 会话才能基于企业资料回答。</span></section>
     <section v-else class="chat-layout">
       <aside class="chat-sessions panel"><div class="chat-panel-heading"><div><p class="eyebrow">会话列表</p><h2>会话</h2></div><button class="secondary-button" :disabled="streaming || sessionActionLoading || creatingSession" type="button" @click="newSession">新建</button></div><form class="chat-session-search" @submit.prevent="loadSessions(false)"><input v-model="sessionSearch" maxlength="100" placeholder="搜索标题或消息" aria-label="搜索会话" /><button class="text-button" type="submit">搜索</button></form><div v-for="session in sessions" :key="session.id" class="chat-session-row"><button v-if="editingSessionId !== session.id" class="chat-session-item" :class="{ active: session.id === sessionId }" type="button" @click="selectSession(session)"><strong>{{ session.title }}</strong><small>{{ new Date(session.updatedAt).toLocaleDateString('zh-CN') }}</small></button><form v-else class="chat-session-edit" @submit.prevent="saveRename(session)"><input v-model="editingTitle" maxlength="200" aria-label="会话名称" /><button class="text-button" :disabled="sessionActionLoading" type="submit">保存</button><button class="text-button" :disabled="sessionActionLoading" type="button" @click="cancelRename">取消</button></form><div v-if="editingSessionId !== session.id" class="chat-session-actions"><button class="text-button" :disabled="streaming || sessionActionLoading" type="button" @click="startRename(session)">重命名</button><button class="text-button danger" :disabled="streaming || sessionActionLoading" type="button" @click="removeSession(session)">删除</button></div></div><button v-if="hasMoreSessions" class="text-button chat-load-more" :disabled="loadingMoreSessions" type="button" @click="loadMore">{{ loadingMoreSessions ? '加载中…' : '加载更多会话' }}</button></aside>
-      <section class="chat-main panel"><div class="chat-main-heading"><div><span class="status-dot online" />{{ activeKnowledgeBase?.name }}</div><span v-if="streaming" class="streaming-label">正在生成…</span></div><div class="chat-messages"><button v-if="hasMoreMessages" class="text-button chat-load-more" :disabled="loadingEarlierMessages" type="button" @click="loadEarlierMessages">{{ loadingEarlierMessages ? '加载中…' : '↑ 加载更早的消息' }}</button><div v-if="!messages.length && !streamingText" class="chat-welcome"><span class="answer-icon" v-html="SPARK_ICON" /><strong>从一个问题开始</strong><span>试试询问文档中的流程、规则或关键结论。</span></div><article v-for="item in messages" :key="item.id" class="chat-bubble" :class="item.role.toLowerCase()"><small>{{ item.role === 'USER' ? '你' : 'AI Copilot' }}</small><p v-if="item.role === 'USER'">{{ item.content }}</p><template v-else><div v-if="looksLikeMarkdown(item.content)" class="markdown-body" v-html="renderMarkdown(item.content)" /><p v-else>{{ item.content }}</p></template><div v-if="item.role === 'ASSISTANT'" class="bubble-actions"><button class="text-button" type="button" @click="copyAnswer(item.content)">复制</button><button v-if="item.id === messages[messages.length - 1]?.id" class="text-button" type="button" @click="regenerate">重新生成</button></div></article><article v-if="streamingText" class="chat-bubble assistant streaming-bubble"><small>AI Copilot · 实时生成</small><div v-if="looksLikeMarkdown(streamingText)" class="markdown-body" v-html="renderMarkdown(streamingText)" /><p v-else>{{ streamingText }}</p><span class="typing-cursor" /></article></div><p v-if="message" class="message chat-message">{{ message }}</p><form class="chat-composer" @submit.prevent="send"><textarea v-model="question" :disabled="streaming" rows="2" maxlength="1000" placeholder="询问你的知识库…" @keydown="handleComposerKeydown" /><button v-if="streaming" class="secondary-button" type="button" @click="stop">停止生成</button><button v-else class="primary-button" :disabled="loading || !question.trim()" type="submit">发送 <span>→</span></button></form></section>
+      <section class="chat-main panel"><div class="chat-main-heading"><div><span class="status-dot online" />{{ activeKnowledgeBase?.name }}</div><span v-if="streaming" class="streaming-label">正在生成…</span></div><div ref="chatMessagesRef" class="chat-messages" @scroll="onMessagesScroll"><button v-if="hasMoreMessages" class="text-button chat-load-more" :disabled="loadingEarlierMessages" type="button" @click="loadEarlierMessages">{{ loadingEarlierMessages ? '加载中…' : '↑ 加载更早的消息' }}</button><div v-if="!messages.length && !streamingText" class="chat-welcome"><span class="answer-icon" v-html="SPARK_ICON" /><strong>从一个问题开始</strong><span>试试询问文档中的流程、规则或关键结论。</span></div><article v-for="item in messages" :key="item.id" class="chat-bubble" :class="item.role.toLowerCase()"><small>{{ item.role === 'USER' ? '你' : 'AI Copilot' }}</small><p v-if="item.role === 'USER'">{{ item.content }}</p><template v-else><div v-if="looksLikeMarkdown(item.content)" class="markdown-body" v-html="renderMarkdown(item.content)" /><p v-else>{{ item.content }}</p></template><div v-if="item.role === 'ASSISTANT'" class="bubble-actions"><button class="text-button" type="button" @click="copyAnswer(item.content)">复制</button><button v-if="item.id === messages[messages.length - 1]?.id" class="text-button" type="button" @click="regenerate">重新生成</button></div></article><article v-if="streamingText" class="chat-bubble assistant streaming-bubble"><small>AI Copilot · 实时生成</small><div v-if="looksLikeMarkdown(streamingText)" class="markdown-body" v-html="renderMarkdown(streamingText)" /><p v-else>{{ streamingText }}</p><span class="typing-cursor" /></article></div><p v-if="message" class="message chat-message">{{ message }}</p><form class="chat-composer" @submit.prevent="send"><textarea v-model="question" :disabled="streaming" rows="2" maxlength="1000" placeholder="询问你的知识库…" @keydown="handleComposerKeydown" /><button v-if="streaming" class="secondary-button" type="button" @click="stop">停止生成</button><button v-else class="primary-button" :disabled="loading || !question.trim()" type="submit">发送 <span>→</span></button></form></section>
       <aside class="chat-sources panel"><div class="chat-panel-heading"><div><p class="eyebrow">引用来源</p><h2>引用来源</h2></div><span v-if="sources.length" class="section-meta">{{ sources.length }} 个片段</span></div><div v-if="sources.length" class="source-list"><article v-for="(source, index) in sources" :key="`${source.documentObjectKey}-${index}`" class="source-card"><span class="source-index">{{ index + 1 }}</span><div><strong>{{ fileName(source.documentObjectKey) }}</strong><small>相关度 {{ source.score.toFixed(2) }} · <span class="retriever-badge" :class="`retriever-${source.retriever ?? 'vector'}`">{{ retrieverLabel(source.retriever) }}</span></small><p>{{ source.content }}</p></div></article></div><div v-else class="source-empty">发送问题后，检索到的文档片段会显示在这里。</div></aside>
     </section>
   </main>
