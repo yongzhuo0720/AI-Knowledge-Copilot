@@ -1,5 +1,7 @@
 # AI Knowledge Copilot
 
+[![CI](https://github.com/yongzhuo0720/AI-Knowledge-Copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/yongzhuo0720/AI-Knowledge-Copilot/actions/workflows/ci.yml)
+
 面向团队的 AI 知识库与 RAG 问答平台：上传企业文档，自动解析并建立向量索引，通过混合检索和 Tool Calling Agent 获取带引用、可解释的答案。
 
 当前仓库对应 GitHub 项目：<https://github.com/yongzhuo0720/AI-Knowledge-Copilot>
@@ -221,7 +223,7 @@ Authorization: Bearer <access-token>
 | `DASHSCOPE_API_KEY` | 百炼 Embedding 密钥 |
 | `AI_SERVICE_INTERNAL_TOKEN` | Backend ↔ AI Service 内部鉴权共享密钥 |
 
-AI Service 任务参数（默认值见 `deploy/docker-compose.yml`）：`AI_SERVICE_TASK_MAX_RETRIES=3`、重试退避 2s、每 5s 恢复未完成任务。切片与检索参数集中在 `ai-service/app/settings.py`。
+AI Service 任务参数（默认值见 `deploy/docker-compose.yml`）：`AI_SERVICE_TASK_MAX_RETRIES=5`、指数退避 3s 起步（共约 93s，覆盖一次 Milvus 冷启动）、每 5s 恢复未完成任务。切片与检索参数集中在 `ai-service/app/settings.py`。
 
 ## 本地开发
 
@@ -245,7 +247,7 @@ npm run build
 
 ## 验证清单
 
-提交前建议全量跑三层测试（当前基线：后端 112、前端 79、ai-service 215 用例全绿）。部署后可运行：
+提交前建议全量跑三层测试（当前基线：后端 115、前端 79、ai-service 215 用例全绿）。CI 会在每次 push / PR 上自动执行同样的三层测试，并用 Docker Compose 拉起真实依赖跑契约探针（模型密钥以 GitHub Secrets 提供时还会跑端到端）。部署后可运行：
 
 ```powershell
 # 端到端：注册 → 建空间 → 建库 → 上传 → 解析 → 问答 → 校验执行轨迹落库
