@@ -27,7 +27,8 @@ class KnowledgeServiceNavigationTest {
                 mock(KnowledgeRetrievalClient.class),
                 mock(KnowledgeAnswerClient.class),
                 workspaceRepository,
-                mock(KnowledgeIndexClient.class)
+                mock(KnowledgeIndexClient.class),
+                mock(DocumentPreviewClient.class)
         );
 
         assertThat(service.findKnowledgeBases(7L, 10L))

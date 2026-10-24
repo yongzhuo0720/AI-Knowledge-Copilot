@@ -36,6 +36,7 @@ public class KnowledgeService {
     private final KnowledgeAnswerClient knowledgeAnswerClient;
     private final WorkspaceRepository workspaceRepository;
     private final KnowledgeIndexClient knowledgeIndexClient;
+    private final DocumentPreviewClient documentPreviewClient;
 
     @Autowired
     public KnowledgeService(
@@ -45,7 +46,8 @@ public class KnowledgeService {
             KnowledgeRetrievalClient knowledgeRetrievalClient,
             KnowledgeAnswerClient knowledgeAnswerClient,
             WorkspaceRepository workspaceRepository,
-            KnowledgeIndexClient knowledgeIndexClient
+            KnowledgeIndexClient knowledgeIndexClient,
+            DocumentPreviewClient documentPreviewClient
     ) {
         this.knowledgeRepository = knowledgeRepository;
         this.documentProcessingClient = documentProcessingClient;
@@ -54,6 +56,7 @@ public class KnowledgeService {
         this.knowledgeAnswerClient = knowledgeAnswerClient;
         this.workspaceRepository = workspaceRepository;
         this.knowledgeIndexClient = knowledgeIndexClient;
+        this.documentPreviewClient = documentPreviewClient;
     }
 
     @Transactional
@@ -242,6 +245,18 @@ public class KnowledgeService {
     private KnowledgeDocument findDocument(Long knowledgeBaseId, Long documentId) {
         return knowledgeRepository.findDocument(knowledgeBaseId, documentId)
                 .orElseThrow(() -> new com.aicopilot.common.exception.BusinessException("DOCUMENT_NOT_FOUND", "document not found"));
+    }
+
+    /**
+     * 单篇文档预览。**刻意不加 {@code @Transactional}**（与 {@link #deleteDocument} 同一取舍）：
+     * ai-service 要重新下载原文并做结构化抽取，是一次可能到秒级的远程调用。
+     * object_key 取自 MySQL 元数据行——归属校验（行级）在这里完成，
+     * 前缀校验（纵深防御）由 ai-service 兜底。
+     */
+    public DocumentPreview previewDocument(Long userId, Long knowledgeBaseId, Long documentId) {
+        authorizeKnowledgeBase(knowledgeBaseId, userId);
+        KnowledgeDocument document = findDocument(knowledgeBaseId, documentId);
+        return documentPreviewClient.preview(knowledgeBaseId, document.objectKey());
     }
 
     private void authorizeWorkspace(Long workspaceId, Long userId) {

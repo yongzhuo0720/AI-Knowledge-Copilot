@@ -13,7 +13,9 @@ public record KnowledgeDocumentResponse(
         String processingTaskId,
         Instant createdAt,
         String processingFailureReason,
-        int processingRetryCount
+        int processingRetryCount,
+        String processingStage,
+        Integer processingProgress
 ) {
 
     public KnowledgeDocumentResponse(
@@ -28,7 +30,7 @@ public record KnowledgeDocumentResponse(
             Instant createdAt
     ) {
         this(id, knowledgeBaseId, originalFilename, objectKey, contentType, fileSize, status,
-                processingTaskId, createdAt, null, 0);
+                processingTaskId, createdAt, null, 0, null, null);
     }
 
     public static KnowledgeDocumentResponse from(KnowledgeDocument document) {
@@ -43,7 +45,9 @@ public record KnowledgeDocumentResponse(
                 document.processingTaskId(),
                 document.createdAt(),
                 document.processingFailureReason(),
-                document.processingRetryCount()
+                document.processingRetryCount(),
+                null,
+                null
         );
     }
 
@@ -62,7 +66,9 @@ public record KnowledgeDocumentResponse(
                 document.processingTaskId(),
                 document.createdAt(),
                 task.failureReason(),
-                task.retryCount()
+                task.retryCount(),
+                task.stage(),
+                task.progress()
         );
     }
 }

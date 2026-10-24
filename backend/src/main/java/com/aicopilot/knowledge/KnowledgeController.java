@@ -103,6 +103,15 @@ public class KnowledgeController {
         return ApiResponse.success(knowledgeService.refreshDocumentProcessingStatus(authenticatedUserId(httpRequest), knowledgeBaseId, documentId));
     }
 
+    @GetMapping("/{knowledgeBaseId}/documents/{documentId}/preview")
+    public ApiResponse<DocumentPreview> previewDocument(
+            @PathVariable Long knowledgeBaseId,
+            @PathVariable Long documentId,
+            HttpServletRequest httpRequest
+    ) {
+        return ApiResponse.success(knowledgeService.previewDocument(authenticatedUserId(httpRequest), knowledgeBaseId, documentId));
+    }
+
     @PostMapping("/{knowledgeBaseId}/documents/{documentId}/reparse")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public ApiResponse<KnowledgeDocumentResponse> reparseDocument(

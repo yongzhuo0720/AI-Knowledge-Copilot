@@ -113,6 +113,58 @@ public class AiServiceConfiguration {
     }
 
     @Bean
+    DocumentPreviewClient documentPreviewClient(AiServiceProperties properties, ObjectMapper objectMapper) {
+        return (knowledgeBaseId, objectKey) -> {
+            if (!properties.isEnabled()) {
+                throw new IllegalStateException("AI service is disabled");
+            }
+            HttpURLConnection connection = null;
+            try {
+                // objectKey 里有斜杠和可能的中文，必须编码后才能拼进 query string
+                String encodedKey = URLEncoder.encode(objectKey, StandardCharsets.UTF_8);
+                connection = (HttpURLConnection) new URL(properties.getBaseUrl()
+                        + "/api/v1/knowledge-bases/" + knowledgeBaseId + "/documents/preview?object_key=" + encodedKey
+                ).openConnection();
+                applyInternalToken(connection, properties);
+                connection.setConnectTimeout(5_000);
+                connection.setReadTimeout(30_000);
+                int statusCode = connection.getResponseCode();
+                if (statusCode != HttpURLConnection.HTTP_OK) {
+                    throw new IllegalStateException("AI service rejected document preview request: HTTP " + statusCode);
+                }
+                try (InputStream inputStream = connection.getInputStream()) {
+                    JsonNode response = objectMapper.readTree(inputStream);
+                    JsonNode data = response.path("data");
+                    if (!"0".equals(response.path("code").asText()) || data.isMissingNode()) {
+                        throw new IllegalStateException("AI service rejected document preview request");
+                    }
+                    List<DocumentPreviewSection> sections = new java.util.ArrayList<>();
+                    for (JsonNode section : data.path("sections")) {
+                        List<String> titlePath = new java.util.ArrayList<>();
+                        section.path("title_path").forEach(title -> titlePath.add(title.asText()));
+                        List<String> blocks = new java.util.ArrayList<>();
+                        section.path("blocks").forEach(block -> blocks.add(block.asText()));
+                        sections.add(new DocumentPreviewSection(List.copyOf(titlePath), List.copyOf(blocks)));
+                    }
+                    return new DocumentPreview(
+                            data.path("name").asText(""),
+                            data.path("section_count").asInt(0),
+                            data.path("block_count").asInt(0),
+                            data.path("truncated").asBoolean(false),
+                            List.copyOf(sections)
+                    );
+                }
+            } catch (IOException exception) {
+                throw new IllegalStateException("failed to preview document", exception);
+            } finally {
+                if (connection != null) {
+                    connection.disconnect();
+                }
+            }
+        };
+    }
+
+    @Bean
     KnowledgeRetrievalClient knowledgeRetrievalClient(AiServiceProperties properties, ObjectMapper objectMapper) {
         return (knowledgeBaseId, query, limit, mode) -> {
             if (!properties.isEnabled()) return List.of();
