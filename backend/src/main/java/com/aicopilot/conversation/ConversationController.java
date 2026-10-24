@@ -25,6 +25,7 @@ import com.aicopilot.common.ratelimit.RateLimiter;
 
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @RestController
 @RequestMapping("/api/v1/knowledge-bases/{knowledgeBaseId}/conversations")
@@ -129,9 +130,17 @@ public class ConversationController {
         // 必须在 new SseEmitter() 之前扣配额，否则拒绝时响应头已经按 200 + event-stream 发出去了。
         consumeAskQuota(userId);
         SseEmitter emitter = new SseEmitter(120_000L);
+        // 断连 / 超时的统一取消信号。send() 抛异常是中止上游的主路径，但它依赖容器
+        // 真正探测到断连（响应有输出缓冲，可能滞后若干条事件）；容器层一旦判定
+        // 客户端没了（onError/onTimeout），下一条事件必须在发送前就放弃，
+        // 否则模型还在吐 token、上游连接还在白白读满 90 秒。
+        AtomicBoolean clientDisconnected = new AtomicBoolean(false);
+        emitter.onTimeout(() -> clientDisconnected.set(true));
+        emitter.onError(ignored -> clientDisconnected.set(true));
         CompletableFuture.runAsync(() -> {
             try {
                 conversationService.streamAsk(userId, knowledgeBaseId, sessionId, request, event -> {
+                    if (clientDisconnected.get()) throw new IllegalStateException("client disconnected");
                     try {
                         emitter.send(SseEmitter.event().name(event.event()).data(event.data()));
                     } catch (Exception exception) {

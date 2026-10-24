@@ -8,6 +8,32 @@
 :mod:`app.document_blocks` 的职责。
 """
 
+import threading
+
+# Minio 客户端内部是 urllib3 连接池，本身线程安全，整个进程复用一个实例即可。
+# 此前每次下载都 new 一个：既丢掉了连接复用，也让 socket 的回收完全依赖 GC。
+# 懒加载是为了把 minio / settings 的导入开销推迟到第一次真正下载时。
+_client = None
+_client_lock = threading.Lock()
+
+
+def _get_client():
+    global _client
+    if _client is None:
+        with _client_lock:
+            if _client is None:
+                from minio import Minio
+
+                from app.settings import settings
+
+                _client = Minio(
+                    settings.minio_endpoint,
+                    access_key=settings.minio_access_key,
+                    secret_key=settings.minio_secret_key,
+                    secure=False,
+                )
+    return _client
+
 
 def download_object(object_key: str) -> bytes:
     """从对象存储取回对象内容。
@@ -15,16 +41,9 @@ def download_object(object_key: str) -> bytes:
     调用方负责确保 object_key 存在；不存在时 Minio 会抛 ``S3Error``，
     由上层的错误处理统一转成可读信息。
     """
-    from minio import Minio
-
     from app.settings import settings
 
-    client = Minio(
-        settings.minio_endpoint,
-        access_key=settings.minio_access_key,
-        secret_key=settings.minio_secret_key,
-        secure=False,
-    )
+    client = _get_client()
     response = client.get_object(settings.minio_bucket, object_key)
     try:
         return response.read()
