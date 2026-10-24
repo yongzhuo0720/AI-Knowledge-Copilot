@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
 
@@ -23,17 +24,26 @@ public class AdminService {
     private final UserRepository userRepository;
     private final ObjectStorageService objectStorageService;
     private final KnowledgeIndexClient knowledgeIndexClient;
+    /**
+     * 级联删除的多条 DELETE 必须在同一个事务里（少删一条指向记录就会撞外键、整批回滚），
+     * 但 {@code cleanupStorage} 里的远程调用不能进事务。声明式 {@code @Transactional}
+     * 只能圈住整个方法，无法表达「只有这一步要原子」，所以这里用编程式事务
+     * 把事务边界精确压到级联删除那一段上。
+     */
+    private final TransactionTemplate transactionTemplate;
 
     public AdminService(
             AdminRepository adminRepository,
             UserRepository userRepository,
             ObjectStorageService objectStorageService,
-            KnowledgeIndexClient knowledgeIndexClient
+            KnowledgeIndexClient knowledgeIndexClient,
+            TransactionTemplate transactionTemplate
     ) {
         this.adminRepository = adminRepository;
         this.userRepository = userRepository;
         this.objectStorageService = objectStorageService;
         this.knowledgeIndexClient = knowledgeIndexClient;
+        this.transactionTemplate = transactionTemplate;
     }
 
     @Transactional(readOnly = true)
@@ -85,7 +95,10 @@ public class AdminService {
         return findUser(targetUserId);
     }
 
-    @Transactional
+    /**
+     * 删除用户。远程清理（向量 / 对象）在事务外执行，只有 MySQL 级联删除
+     * 在编程式事务里原子完成——见 {@link #transactionTemplate} 的注释。
+     */
     public void deleteUser(Long operatorId, Long targetUserId) {
         requireAdmin(operatorId);
         requireUserExists(targetUserId);
@@ -96,21 +109,21 @@ public class AdminService {
             throw new BusinessException("LAST_ADMIN_PROTECTED", "cannot delete the only administrator");
         }
         cleanupStorage(adminRepository.findKnowledgeBaseIdsOwnedBy(targetUserId));
-        adminRepository.deleteUserCascade(targetUserId);
+        transactionTemplate.executeWithoutResult(status -> adminRepository.deleteUserCascade(targetUserId));
     }
 
-    @Transactional
+    /** 删除工作空间。事务边界同 {@link #deleteUser}。 */
     public void deleteWorkspace(Long operatorId, Long workspaceId) {
         requireAdmin(operatorId);
         cleanupStorage(adminRepository.findKnowledgeBaseIdsByWorkspace(workspaceId));
-        adminRepository.deleteWorkspaceCascade(workspaceId);
+        transactionTemplate.executeWithoutResult(status -> adminRepository.deleteWorkspaceCascade(workspaceId));
     }
 
-    @Transactional
+    /** 删除知识库。事务边界同 {@link #deleteUser}。 */
     public void deleteKnowledgeBase(Long operatorId, Long knowledgeBaseId) {
         requireAdmin(operatorId);
         cleanupStorage(List.of(knowledgeBaseId));
-        adminRepository.deleteKnowledgeBaseCascade(knowledgeBaseId);
+        transactionTemplate.executeWithoutResult(status -> adminRepository.deleteKnowledgeBaseCascade(knowledgeBaseId));
     }
 
     /**

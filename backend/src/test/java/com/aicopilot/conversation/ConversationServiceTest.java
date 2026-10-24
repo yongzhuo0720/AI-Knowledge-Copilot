@@ -15,9 +15,11 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -158,6 +160,59 @@ class ConversationServiceTest {
         assertThat(reply.assistantMessage().sources()).containsExactly(source);
         assertThat(reply.assistantMessage().agentSteps()).containsExactly(step);
         verify(repository).touchSession(7L);
+    }
+
+    @Test
+    void keepsTheUserMessageWhenTheAgentCallFails() {
+        ConversationRepository repository = mock(ConversationRepository.class);
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        KnowledgeAgentClient agentClient = mock(KnowledgeAgentClient.class);
+        ConversationSession session = new ConversationSession(7L, 20L, 3L, "Agent 会话", Instant.now(), Instant.now());
+        when(repository.findSession(7L, 20L, 3L)).thenReturn(java.util.Optional.of(session));
+        when(repository.findMessages(7L, 20, 0)).thenReturn(List.of());
+        when(repository.saveMessage(any(ConversationMessage.class))).thenAnswer(invocation -> {
+            ConversationMessage message = invocation.getArgument(0);
+            return new ConversationMessage(2L, message.sessionId(), message.role(), message.content(),
+                    Instant.now(), message.sources(), message.agentSteps());
+        });
+        when(agentClient.run(anyLong(), anyString(), any()))
+                .thenThrow(new IllegalStateException("ai service down"));
+
+        // 模型调用在事务外执行（连接不跨 HTTP 持有），代价是失败时不再整体回滚：
+        // 提问记录保留，错误提示交给调用方——与主流聊天产品的行为一致。
+        assertThatThrownBy(() -> new ConversationService(repository, knowledgeService,
+                        mock(KnowledgeAnswerClient.class), agentClient)
+                .askAgent(3L, 20L, 7L, new CreateMessageRequest("当前问题")))
+                .isInstanceOf(IllegalStateException.class);
+        verify(repository).saveMessage(any(ConversationMessage.class));
+        verify(repository, never()).touchSession(7L);
+    }
+
+    @Test
+    void keepsTheUserMessageAndStopsTheEventFlowWhenStreamingFails() {
+        ConversationRepository repository = mock(ConversationRepository.class);
+        KnowledgeService knowledgeService = mock(KnowledgeService.class);
+        KnowledgeAnswerClient answerClient = mock(KnowledgeAnswerClient.class);
+        ConversationSession session = new ConversationSession(7L, 20L, 3L, "产品问答", Instant.now(), Instant.now());
+        when(repository.findSession(7L, 20L, 3L)).thenReturn(java.util.Optional.of(session));
+        when(repository.findMessages(7L, 20, 0)).thenReturn(List.of());
+        when(repository.saveMessage(any(ConversationMessage.class))).thenAnswer(invocation -> {
+            ConversationMessage message = invocation.getArgument(0);
+            return new ConversationMessage(2L, message.sessionId(), message.role(), message.content(),
+                    Instant.now(), message.sources());
+        });
+        when(answerClient.stream(eq(20L), eq("当前问题"), eq(List.of()), any()))
+                .thenThrow(new IllegalStateException("ai service down"));
+        List<ConversationStreamEvent> events = new java.util.ArrayList<>();
+
+        assertThatThrownBy(() -> new ConversationService(repository, knowledgeService, answerClient,
+                        mock(KnowledgeAgentClient.class))
+                .streamAsk(3L, 20L, 7L, new CreateMessageRequest("当前问题"), events::add))
+                .isInstanceOf(IllegalStateException.class);
+
+        // 流失败后只有 user 事件，绝不能有 sources/complete（半截答案当成功是另一类 bug）
+        assertThat(events).extracting(ConversationStreamEvent::event).containsExactly("user");
+        verify(repository).saveMessage(any(ConversationMessage.class));
     }
 
     @Test

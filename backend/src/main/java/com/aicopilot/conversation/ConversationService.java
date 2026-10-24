@@ -108,7 +108,14 @@ public class ConversationService {
         conversationRepository.deleteSession(sessionId);
     }
 
-    @Transactional
+    /**
+     * Agent 问答。**刻意不加 {@code @Transactional}**：agentClient.run 是一次
+     * 最长可到分钟级的模型调用，放进事务会把数据库连接绑死整个 HTTP 时长，
+     * 十个并发就能耗尽 HikariCP 默认的 10 个连接。见 {@link #streamAsk} 的完整取舍。
+     *
+     * <p>由此接受的行为变化：模型调用失败时用户消息**不再回滚**——提问记录保留、
+     * 错误提示交给调用方（SSE error 事件 / 4xx 响应），这与主流聊天产品一致。
+     */
     public ConversationReply askAgent(Long userId, Long knowledgeBaseId, Long sessionId, CreateMessageRequest request) {
         findOwnedSession(userId, knowledgeBaseId, sessionId);
         List<ConversationMessage> history = recentHistory(sessionId);
@@ -124,7 +131,20 @@ public class ConversationService {
         return new ConversationReply(userMessage, assistantMessage);
     }
 
-    @Transactional
+    /**
+     * SSE 流式问答。**刻意不加 {@code @Transactional}**，这条注释就是审查报告
+     * 「事务内外部 HTTP 调用」遗留项的结案陈述：
+     *
+     * <p>流式回答的 HTTP 读取最长 90 秒。旧实现里整个方法在事务内运行——数据库连接
+     * 从方法开始被独占到方法结束，其中 95% 的时间连接处于空闲等待模型吐字的状态。
+     * HikariCP 默认池只有 10 个连接，10 个并发的流式提问就能让全站所有请求排队。
+     * 修法是把事务删掉：JdbcTemplate 的每条语句各自借用连接、用完即还，
+     * 连接不再跨越模型调用存活。
+     *
+     * <p>放弃的是「模型失败则用户消息回滚」的原子性。这本来就是一笔坏账：
+     * 为了回滚一条 INSERT 而绑住一条连接 90 秒，代价远大于收益——而且提问记录
+     * 保留下来反而更符合直觉（回答失败时用户能看到「我问过什么」，重试即可）。
+     */
     public void streamAsk(Long userId, Long knowledgeBaseId, Long sessionId, CreateMessageRequest request,
                           Consumer<ConversationStreamEvent> onEvent) {
         findOwnedSession(userId, knowledgeBaseId, sessionId);

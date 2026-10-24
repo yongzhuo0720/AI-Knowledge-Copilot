@@ -7,6 +7,8 @@ import com.aicopilot.user.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
 import java.util.Optional;
@@ -24,6 +26,7 @@ class AdminServiceTest {
     private AdminRepository adminRepository;
     private ObjectStorageService storageService;
     private KnowledgeIndexClient indexClient;
+    private PlatformTransactionManager transactionManager;
     private AdminService adminService;
 
     @BeforeEach
@@ -37,7 +40,9 @@ class AdminServiceTest {
         when(adminRepository.findUsers(null)).thenReturn(List.of(
                 new AdminUserResponse(1L, "admin", "admin@example.com", "ACTIVE", true, null, 0, 0, 0),
                 new AdminUserResponse(7L, "target", "target@example.com", "ACTIVE", true, null, 0, 0, 0)));
-        adminService = new AdminService(adminRepository, userRepository, storageService, indexClient);
+        transactionManager = mock(PlatformTransactionManager.class);
+        adminService = new AdminService(adminRepository, userRepository, storageService, indexClient,
+                new TransactionTemplate(transactionManager));
     }
 
     @Test
@@ -52,6 +57,18 @@ class AdminServiceTest {
         order.verify(storageService).delete("kb/20/a/guide.pdf");
         order.verify(storageService).delete("kb/20/b/notes.md");
         order.verify(adminRepository).deleteKnowledgeBaseCascade(20L);
+    }
+
+    @Test
+    void runsTheCascadeDeleteInsideAnExplicitTransaction() {
+        when(adminRepository.findDocumentObjectKeysByKnowledgeBases(List.of(20L))).thenReturn(List.of());
+
+        adminService.deleteKnowledgeBase(1L, 20L);
+
+        // 多语句级联删除必须整体原子（少删一条指向记录就撞外键、整批回滚），
+        // 但远程清理不能进事务——所以事务边界精确压在级联这一步上。
+        verify(transactionManager).getTransaction(any());
+        verify(transactionManager).commit(any());
     }
 
     @Test

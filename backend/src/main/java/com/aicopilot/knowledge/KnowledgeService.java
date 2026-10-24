@@ -77,7 +77,11 @@ public class KnowledgeService {
                 .toList();
     }
 
-    @Transactional
+    /**
+     * 登记文档并提交解析任务。**刻意不加 {@code @Transactional}**：submit 是一次
+     * 远程 HTTP 调用，放进事务会让数据库连接陪跑整个请求超时窗口。
+     * 各语句各自提交，失败路径见 {@link #uploadDocument} 的说明。
+     */
     public KnowledgeDocumentResponse registerDocument(Long userId, Long knowledgeBaseId, RegisterDocumentRequest request) {
         authorizeKnowledgeBase(knowledgeBaseId, userId);
         String originalFilename = request.originalFilename().trim();
@@ -105,7 +109,15 @@ public class KnowledgeService {
         return KnowledgeDocumentResponse.from(withProcessingTask(document, task.taskId(), task.status()), task);
     }
 
-    @Transactional
+    /**
+     * 上传：先写 MinIO，再登记元数据并提交解析任务。**刻意不加 {@code @Transactional}**
+     * （理由与 {@link #deleteDocument} 相同，详见 {@link #registerDocument}）。
+     *
+     * <p>这里还顺带修掉一个隐藏问题：旧实现整个方法在事务内，若提交解析任务失败
+     * 会把元数据一起回滚——但对象已经传进 MinIO，回滚后它就成了**没有任何元数据
+     * 指向的孤儿对象**，永远没人能删掉它。现在元数据保留为 UPLOADED 状态，
+     * 用户点「重新解析」即可重新提交任务，对象始终有主。
+     */
     public KnowledgeDocumentResponse uploadDocument(
             Long userId,
             Long knowledgeBaseId,
@@ -148,20 +160,20 @@ public class KnowledgeService {
         return knowledgeRepository.findDocumentsForWorkspace(workspaceId, query, status, knowledgeBaseId);
     }
 
-    @Transactional(readOnly = true)
+    /** 检索调试与问答共用的检索入口。检索本身是 ai-service 的远程调用，不能放进事务。 */
     public List<KnowledgeRetrievalChunk> search(Long userId, Long knowledgeBaseId, KnowledgeSearchRequest request) {
         authorizeKnowledgeBase(knowledgeBaseId, userId);
         return knowledgeRetrievalClient.search(
                 knowledgeBaseId, request.query().trim(), request.resolvedLimit(), request.resolvedMode());
     }
 
-    @Transactional(readOnly = true)
+    /** 带引用的直接回答。模型调用是远程 HTTP，见 {@code ConversationService.streamAsk} 的结案注释。 */
     public KnowledgeAnswer answer(Long userId, Long knowledgeBaseId, KnowledgeQuestionRequest request) {
         authorizeKnowledgeBase(knowledgeBaseId, userId);
         return knowledgeAnswerClient.answer(knowledgeBaseId, request.question().trim());
     }
 
-    @Transactional
+    /** 刷新解析状态。中间有一次到 ai-service 的远程查询，不放事务。 */
     public KnowledgeDocumentResponse refreshDocumentProcessingStatus(Long userId, Long knowledgeBaseId, Long documentId) {
         authorizeKnowledgeBase(knowledgeBaseId, userId);
         KnowledgeDocument document = knowledgeRepository.findDocument(knowledgeBaseId, documentId)
@@ -174,7 +186,7 @@ public class KnowledgeService {
         return KnowledgeDocumentResponse.from(withProcessingTask(document, document.processingTaskId(), task.status()), task);
     }
 
-    @Transactional
+    /** 重新解析 = 重新提交解析任务。远程提交不放事务，理由同 {@link #registerDocument}。 */
     public KnowledgeDocumentResponse reparseDocument(Long userId, Long knowledgeBaseId, Long documentId) {
         authorizeKnowledgeBase(knowledgeBaseId, userId);
         KnowledgeDocument document = findDocument(knowledgeBaseId, documentId);
@@ -189,7 +201,7 @@ public class KnowledgeService {
         return KnowledgeDocumentResponse.from(withProcessingTask(document, task.taskId(), task.status()), task);
     }
 
-    @Transactional
+    /** 重试既有任务 / 退化成重新解析。远程调用不放事务，理由同 {@link #registerDocument}。 */
     public KnowledgeDocumentResponse retryDocumentProcessing(Long userId, Long knowledgeBaseId, Long documentId) {
         authorizeKnowledgeBase(knowledgeBaseId, userId);
         KnowledgeDocument document = findDocument(knowledgeBaseId, documentId);
