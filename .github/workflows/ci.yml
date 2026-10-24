@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 三层单测并行跑，compose e2e 单独一个 job：
+# 它要构建全部镜像并拉起 9 个容器，是最慢也最接近真实的一步。
+# 仓库的验证基线（README「验证清单」）由此在每次 push 上自动执行，
+# 不再依赖贡献者自觉。
+jobs:
+  ai-service-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          # 与 ai-service/Dockerfile 的运行时大版本保持一致
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ai-service/pyproject.toml
+      - name: Install with dev extras
+        run: pip install -e ".[dev]"
+        working-directory: ai-service
+      - name: pytest
+        run: pytest -q
+        working-directory: ai-service
+
+  backend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: mvn test
+        run: mvn -f backend/pom.xml test
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: npm ci
+        run: npm ci
+        working-directory: frontend
+      - name: vitest
+        run: npm test
+        working-directory: frontend
+      # vue-tsc 类型检查藏在 build 里：类型不通过的 PR 在这里就红
+      - name: vue-tsc + vite build
+        run: npm run build
+        working-directory: frontend
+
+  e2e:
+    runs-on: ubuntu-latest
+    env:
+      # secrets 不能直接用在 job.if 里，先转成 env 再判断（官方文档推荐写法）。
+      HAS_MODEL_KEYS: ${{ secrets.DEEPSEEK_API_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare deploy/.env
+        run: |
+          cp deploy/.env.example deploy/.env
+          {
+            echo "DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}"
+            echo "DASHSCOPE_API_KEY=${{ secrets.DASHSCOPE_API_KEY }}"
+          } >> deploy/.env
+      - name: Build and start the full stack
+        run: docker compose --env-file ./deploy/.env -f ./deploy/docker-compose.yml up -d --build
+      - name: Wait for every core container to turn healthy
+        run: |
+          for i in $(seq 1 60); do
+            unhealthy=$(docker ps --filter "name=ai-copilot-" --format '{{.Names}} {{.Status}}' \
+              | grep -v 'milvus-minio' | grep -cv 'healthy' || true)
+            echo "check $i: $unhealthy containers not healthy yet"
+            if [ "$unhealthy" -eq 0 ]; then exit 0; fi
+            sleep 10
+          done
+          docker ps -a --format '{{.Names}}: {{.Status}}'
+          docker logs ai-copilot-milvus 2>&1 | tail -50
+          exit 1
+      # 契约探针不调模型（配额断言走 403/429 路径），没有密钥也能跑满 33 项
+      - name: Contract probes (no model keys needed)
+        run: python scripts/verify_c_group.py
+      - name: End-to-end agent flow (needs model API keys)
+        if: env.HAS_MODEL_KEYS == 'true'
+        run: python scripts/e2e_agent.py
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          docker ps -a --format '{{.Names}}: {{.Status}}'
+          for c in ai-copilot-backend ai-copilot-ai-service ai-copilot-milvus; do
+            echo "===== $c ====="
+            docker logs "$c" 2>&1 | tail -60
+          done
