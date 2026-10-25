@@ -129,7 +129,10 @@ services:
       retries: 10
 
   minio:
-    image: minio/minio:latest
+    # 镜像从官方 Release 二进制自建（见 minio/Dockerfile 顶部说明）
+    build:
+      context: ./minio
+    image: ai-copilot-minio-server
     container_name: ai-copilot-minio
     restart: unless-stopped
     environment:
@@ -140,7 +143,8 @@ services:
       - "9000:9000"
       - "9001:9001"
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      # 自建镜像里没有 mc，用 MinIO 自带的存活端点探活（alpine 自带 wget）
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9000/minio/health/live"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -199,11 +203,15 @@ services:
       retries: 18
 
   milvus-minio:
-    image: minio/minio:latest
+    # 与 minio 共用同一份自建镜像。注意 command 不带 "minio" 前缀：
+    # 自建镜像的 ENTRYPOINT 就是二进制本身（官方镜像是入口脚本，写法不同）
+    build:
+      context: ./minio
+    image: ai-copilot-minio-server
     container_name: ai-copilot-milvus-minio
     # 同上：milvus 的对象存储依赖，daemon 重启后必须自启。
     restart: unless-stopped
-    command: minio server /minio_data
+    command: server /minio_data
     volumes:
       - milvus-minio-data:/minio_data
 
