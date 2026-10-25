@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.aicopilot.conversation.ConversationMessage;
 import com.aicopilot.dashboard.IndexedChunkClient;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -49,41 +50,46 @@ public class AiServiceConfiguration {
     @Bean
     DocumentProcessingClient documentProcessingClient(
             AiServiceProperties properties,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            MeterRegistry meterRegistry
     ) {
+        AiClientMetrics metrics = new AiClientMetrics(meterRegistry);
         return new DocumentProcessingClient() {
             @Override
             public DocumentProcessingResponse submit(DocumentProcessingRequest request) {
                 if (!properties.isEnabled()) return new DocumentProcessingResponse("disabled", request.objectKey(), "DISABLED");
-                return submitToAiService(properties, objectMapper, request);
+                return metrics.timed("document.submit", () -> submitToAiService(properties, objectMapper, request));
             }
 
             @Override
             public DocumentProcessingResponse findTask(String taskId) {
                 if (!properties.isEnabled()) return new DocumentProcessingResponse(taskId, "", "DISABLED");
-                return findTaskInAiService(properties, objectMapper, taskId);
+                return metrics.timed("document.find", () -> findTaskInAiService(properties, objectMapper, taskId));
             }
 
             @Override
             public DocumentProcessingResponse retry(String taskId) {
                 if (!properties.isEnabled()) return new DocumentProcessingResponse(taskId, "", "DISABLED");
-                return retryInAiService(properties, objectMapper, taskId);
+                return metrics.timed("document.retry", () -> retryInAiService(properties, objectMapper, taskId));
             }
         };
     }
 
     @Bean
-    KnowledgeIndexClient knowledgeIndexClient(AiServiceProperties properties) {
+    KnowledgeIndexClient knowledgeIndexClient(AiServiceProperties properties, MeterRegistry meterRegistry) {
+        AiClientMetrics metrics = new AiClientMetrics(meterRegistry);
         return new KnowledgeIndexClient() {
             @Override
             public void deleteKnowledgeBaseIndex(Long knowledgeBaseId) {
-                delete(properties, "/api/v1/knowledge-bases/" + knowledgeBaseId + "/index");
+                metrics.timed("index.delete_kb", () ->
+                        delete(properties, "/api/v1/knowledge-bases/" + knowledgeBaseId + "/index"));
             }
 
             @Override
             public void deleteDocumentIndex(Long knowledgeBaseId, String objectKey) {
-                delete(properties, "/api/v1/knowledge-bases/" + knowledgeBaseId + "/documents/index?object_key="
-                        + URLEncoder.encode(objectKey, StandardCharsets.UTF_8));
+                metrics.timed("index.delete_document", () ->
+                        delete(properties, "/api/v1/knowledge-bases/" + knowledgeBaseId + "/documents/index?object_key="
+                                + URLEncoder.encode(objectKey, StandardCharsets.UTF_8)));
             }
 
             private void delete(AiServiceProperties properties, String path) {
@@ -113,102 +119,112 @@ public class AiServiceConfiguration {
     }
 
     @Bean
-    DocumentPreviewClient documentPreviewClient(AiServiceProperties properties, ObjectMapper objectMapper) {
+    DocumentPreviewClient documentPreviewClient(AiServiceProperties properties, ObjectMapper objectMapper, MeterRegistry meterRegistry) {
+        AiClientMetrics metrics = new AiClientMetrics(meterRegistry);
         return (knowledgeBaseId, objectKey) -> {
             if (!properties.isEnabled()) {
                 throw new IllegalStateException("AI service is disabled");
             }
-            HttpURLConnection connection = null;
-            try {
-                // objectKey 里有斜杠和可能的中文，必须编码后才能拼进 query string
-                String encodedKey = URLEncoder.encode(objectKey, StandardCharsets.UTF_8);
-                connection = (HttpURLConnection) new URL(properties.getBaseUrl()
-                        + "/api/v1/knowledge-bases/" + knowledgeBaseId + "/documents/preview?object_key=" + encodedKey
-                ).openConnection();
-                applyInternalToken(connection, properties);
-                connection.setConnectTimeout(5_000);
-                connection.setReadTimeout(30_000);
-                int statusCode = connection.getResponseCode();
-                if (statusCode != HttpURLConnection.HTTP_OK) {
-                    throw new IllegalStateException("AI service rejected document preview request: HTTP " + statusCode);
-                }
-                try (InputStream inputStream = connection.getInputStream()) {
-                    JsonNode response = objectMapper.readTree(inputStream);
-                    JsonNode data = response.path("data");
-                    if (!"0".equals(response.path("code").asText()) || data.isMissingNode()) {
-                        throw new IllegalStateException("AI service rejected document preview request");
+            return metrics.timed("document.preview", () -> {
+                HttpURLConnection connection = null;
+                try {
+                    // objectKey 里有斜杠和可能的中文，必须编码后才能拼进 query string
+                    String encodedKey = URLEncoder.encode(objectKey, StandardCharsets.UTF_8);
+                    connection = (HttpURLConnection) new URL(properties.getBaseUrl()
+                            + "/api/v1/knowledge-bases/" + knowledgeBaseId + "/documents/preview?object_key=" + encodedKey
+                    ).openConnection();
+                    applyInternalToken(connection, properties);
+                    connection.setConnectTimeout(5_000);
+                    connection.setReadTimeout(30_000);
+                    int statusCode = connection.getResponseCode();
+                    if (statusCode != HttpURLConnection.HTTP_OK) {
+                        throw new IllegalStateException("AI service rejected document preview request: HTTP " + statusCode);
                     }
-                    List<DocumentPreviewSection> sections = new java.util.ArrayList<>();
-                    for (JsonNode section : data.path("sections")) {
-                        List<String> titlePath = new java.util.ArrayList<>();
-                        section.path("title_path").forEach(title -> titlePath.add(title.asText()));
-                        List<String> blocks = new java.util.ArrayList<>();
-                        section.path("blocks").forEach(block -> blocks.add(block.asText()));
-                        sections.add(new DocumentPreviewSection(List.copyOf(titlePath), List.copyOf(blocks)));
+                    try (InputStream inputStream = connection.getInputStream()) {
+                        JsonNode response = objectMapper.readTree(inputStream);
+                        JsonNode data = response.path("data");
+                        if (!"0".equals(response.path("code").asText()) || data.isMissingNode()) {
+                            throw new IllegalStateException("AI service rejected document preview request");
+                        }
+                        List<DocumentPreviewSection> sections = new java.util.ArrayList<>();
+                        for (JsonNode section : data.path("sections")) {
+                            List<String> titlePath = new java.util.ArrayList<>();
+                            section.path("title_path").forEach(title -> titlePath.add(title.asText()));
+                            List<String> blocks = new java.util.ArrayList<>();
+                            section.path("blocks").forEach(block -> blocks.add(block.asText()));
+                            sections.add(new DocumentPreviewSection(List.copyOf(titlePath), List.copyOf(blocks)));
+                        }
+                        return new DocumentPreview(
+                                data.path("name").asText(""),
+                                data.path("section_count").asInt(0),
+                                data.path("block_count").asInt(0),
+                                data.path("truncated").asBoolean(false),
+                                List.copyOf(sections)
+                        );
                     }
-                    return new DocumentPreview(
-                            data.path("name").asText(""),
-                            data.path("section_count").asInt(0),
-                            data.path("block_count").asInt(0),
-                            data.path("truncated").asBoolean(false),
-                            List.copyOf(sections)
-                    );
+                } catch (IOException exception) {
+                    throw new IllegalStateException("failed to preview document", exception);
+                } finally {
+                    if (connection != null) {
+                        connection.disconnect();
+                    }
                 }
-            } catch (IOException exception) {
-                throw new IllegalStateException("failed to preview document", exception);
-            } finally {
-                if (connection != null) {
-                    connection.disconnect();
-                }
-            }
+            });
         };
     }
 
     @Bean
-    KnowledgeRetrievalClient knowledgeRetrievalClient(AiServiceProperties properties, ObjectMapper objectMapper) {
+    KnowledgeRetrievalClient knowledgeRetrievalClient(
+            AiServiceProperties properties, ObjectMapper objectMapper, MeterRegistry meterRegistry
+    ) {
+        AiClientMetrics metrics = new AiClientMetrics(meterRegistry);
         return (knowledgeBaseId, query, limit, mode) -> {
             if (!properties.isEnabled()) return List.of();
-            try {
-                HttpURLConnection connection = (HttpURLConnection) new URL(
-                        properties.getBaseUrl() + "/api/v1/retrieval/search"
-                ).openConnection();
-                applyInternalToken(connection, properties);
-                connection.setRequestMethod("POST");
-                connection.setConnectTimeout(5_000);
-                connection.setReadTimeout(30_000);
-                connection.setDoOutput(true);
-                connection.setRequestProperty("Content-Type", MediaType.APPLICATION_JSON_VALUE);
-                byte[] payload = objectMapper.writeValueAsBytes(new AiServiceRetrievalRequest(knowledgeBaseId, query, limit, mode));
-                connection.setFixedLengthStreamingMode(payload.length);
-                try (var outputStream = connection.getOutputStream()) {
-                    outputStream.write(payload);
-                }
-                if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
-                    throw new IllegalStateException("AI service rejected retrieval request");
-                }
-                try (InputStream inputStream = connection.getInputStream()) {
-                    JsonNode response = objectMapper.readTree(inputStream);
-                    if (!"0".equals(response.path("code").asText()) || !response.path("data").isArray()) {
+            return metrics.timed("retrieval.search", () -> {
+                try {
+                    HttpURLConnection connection = (HttpURLConnection) new URL(
+                            properties.getBaseUrl() + "/api/v1/retrieval/search"
+                    ).openConnection();
+                    applyInternalToken(connection, properties);
+                    connection.setRequestMethod("POST");
+                    connection.setConnectTimeout(5_000);
+                    connection.setReadTimeout(30_000);
+                    connection.setDoOutput(true);
+                    connection.setRequestProperty("Content-Type", MediaType.APPLICATION_JSON_VALUE);
+                    byte[] payload = objectMapper.writeValueAsBytes(new AiServiceRetrievalRequest(knowledgeBaseId, query, limit, mode));
+                    connection.setFixedLengthStreamingMode(payload.length);
+                    try (var outputStream = connection.getOutputStream()) {
+                        outputStream.write(payload);
+                    }
+                    if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) {
                         throw new IllegalStateException("AI service rejected retrieval request");
                     }
-                    return toRetrievalChunks(response.path("data"));
-                } finally {
-                    connection.disconnect();
+                    try (InputStream inputStream = connection.getInputStream()) {
+                        JsonNode response = objectMapper.readTree(inputStream);
+                        if (!"0".equals(response.path("code").asText()) || !response.path("data").isArray()) {
+                            throw new IllegalStateException("AI service rejected retrieval request");
+                        }
+                        return toRetrievalChunks(response.path("data"));
+                    } finally {
+                        connection.disconnect();
+                    }
+                } catch (IOException exception) {
+                    throw new IllegalStateException("failed to retrieve knowledge chunks", exception);
                 }
-            } catch (IOException exception) {
-                throw new IllegalStateException("failed to retrieve knowledge chunks", exception);
-            }
+            });
         };
     }
 
     @Bean
     KnowledgeAnswerClient knowledgeAnswerClient(
-            AiServiceProperties properties, ObjectMapper objectMapper
+            AiServiceProperties properties, ObjectMapper objectMapper, MeterRegistry meterRegistry
     ) {
+        AiClientMetrics metrics = new AiClientMetrics(meterRegistry);
         return new KnowledgeAnswerClient() {
             @Override
             public KnowledgeAnswer answer(Long knowledgeBaseId, String question, List<ConversationMessage> history) {
             if (!properties.isEnabled()) return new KnowledgeAnswer("AI service is disabled", List.of());
+            return metrics.timed("answer.ask", () -> {
             HttpURLConnection connection = null;
             try {
                 connection = (HttpURLConnection) new URL(
@@ -252,6 +268,7 @@ public class AiServiceConfiguration {
                     connection.disconnect();
                 }
             }
+            });
             }
 
             @Override
@@ -262,6 +279,7 @@ public class AiServiceConfiguration {
                     onDelta.accept(fallback);
                     return new KnowledgeAnswer(fallback, List.of());
                 }
+                return metrics.timed("answer.stream", () -> {
                 HttpURLConnection connection = null;
                 try {
                     connection = (HttpURLConnection) new URL(
@@ -328,16 +346,21 @@ public class AiServiceConfiguration {
                 } finally {
                     if (connection != null) connection.disconnect();
                 }
+                });
             }
         };
     }
 
     @Bean
-    KnowledgeAgentClient knowledgeAgentClient(AiServiceProperties properties, ObjectMapper objectMapper) {
+    KnowledgeAgentClient knowledgeAgentClient(
+            AiServiceProperties properties, ObjectMapper objectMapper, MeterRegistry meterRegistry
+    ) {
+        AiClientMetrics metrics = new AiClientMetrics(meterRegistry);
         return (knowledgeBaseId, question, history) -> {
             if (!properties.isEnabled()) {
                 return new KnowledgeAgentAnswer("AI service is disabled", List.of(), List.of());
             }
+            return metrics.timed("agent.run", () -> {
             try {
                 HttpURLConnection connection = (HttpURLConnection) new URL(
                         properties.getBaseUrl() + "/api/v1/agents/knowledge"
@@ -386,6 +409,7 @@ public class AiServiceConfiguration {
             } catch (IOException exception) {
                 throw new IllegalStateException("failed to run knowledge agent", exception);
             }
+            });
         };
     }
 

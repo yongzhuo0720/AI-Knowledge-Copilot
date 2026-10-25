@@ -40,6 +40,14 @@ async def lifespan(application: FastAPI):
 app = FastAPI(title=settings.app_name, version=settings.app_version, lifespan=lifespan)
 logger = logging.getLogger(__name__)
 
+# uvicorn 只给自己的日志挂 handler，应用包的 logger 会落到根 logger 上——
+# 而根 logger 默认只放行 WARNING，解析耗时这类 INFO 日志会被静默丢弃。
+# 这里把应用包提到 INFO（解析各阶段的耗时统计就在这个级别），
+# 同时压住已知的高频三方噪音，避免日志被淹没。
+logging.basicConfig(level=logging.INFO)
+for _noisy in ("pymilvus", "urllib3", "httpx", "httpcore"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+
 INTERNAL_TOKEN_HEADER = "X-Internal-Token"
 _PUBLIC_PATHS = frozenset({"/api/v1/health"})
 

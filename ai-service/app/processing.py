@@ -187,10 +187,16 @@ def process_parse_task(task_id: str, request: ParseDocumentRequest | None = None
                     _set_task(task_id, "PROCESSING", None, task.retry_count)
                     _set_progress(task_id, 5, "claimed")
                     try:
+                        stage_started = time.monotonic()
                         content = download_object(request.object_key)
+                        logger.info(
+                            "parse task %s: downloaded %d bytes in %.2fs",
+                            task_id, len(content), time.monotonic() - stage_started,
+                        )
                         _set_progress(task_id, 25, "downloaded")
                         # 抽取与切片一步到位：结构信息必须从抽取阶段就带出来，
                         # 否则切片只能在无结构的一长串字符上猜边界。详见 app/chunking.py
+                        stage_started = time.monotonic()
                         chunks = chunk_document(
                             content,
                             request.content_type,
@@ -200,7 +206,12 @@ def process_parse_task(task_id: str, request: ParseDocumentRequest | None = None
                         )
                         if not chunks:
                             raise ValueError("document does not contain extractable text")
+                        logger.info(
+                            "parse task %s: extracted %d chunks in %.2fs",
+                            task_id, len(chunks), time.monotonic() - stage_started,
+                        )
                         _set_progress(task_id, 45, "chunked")
+                        stage_started = time.monotonic()
                         index_chunks(
                             request.knowledge_base_id,
                             request.object_key,
@@ -211,6 +222,10 @@ def process_parse_task(task_id: str, request: ParseDocumentRequest | None = None
                             on_progress=lambda done, total: _set_progress(
                                 task_id, 50 + int(40 * done / max(total, 1)), "embedding"
                             ),
+                        )
+                        logger.info(
+                            "parse task %s: indexed %d chunks in %.2fs",
+                            task_id, len(chunks), time.monotonic() - stage_started,
                         )
                         _clear_progress(task_id)
                         _set_task(task_id, "COMPLETED", None, task.retry_count)

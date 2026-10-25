@@ -225,6 +225,13 @@ Authorization: Bearer <access-token>
 
 AI Service 任务参数（默认值见 `deploy/docker-compose.yml`）：`AI_SERVICE_TASK_MAX_RETRIES=5`、指数退避 3s 起步（共约 93s，覆盖一次 Milvus 冷启动）、每 5s 恢复未完成任务。切片与检索参数集中在 `ai-service/app/settings.py`。
 
+## 可观测性
+
+- Backend 暴露 `/actuator/prometheus`（只随 8080 暴露在 compose 网络内，nginx 不反代 actuator，公网不可达）：
+  - `aicopilot_ai_request_seconds{capability,outcome}` —— 全部 10 个 AI 能力入口的耗时与成败（agent.run / answer.stream / retrieval.search / document.submit …），Prometheus 里可直接算每个能力的 P95 与失败率；
+  - `aicopilot_ratelimit_rejected{bucket}` —— 限流拒绝数，判断「被刷」还是「策略配错」的第一信号。
+- AI Service 解析任务按阶段打耗时日志（下载 / 切片 / 索引），慢在哪个阶段一眼可见。
+
 ## 本地开发
 
 ```powershell
@@ -247,7 +254,7 @@ npm run build
 
 ## 验证清单
 
-提交前建议全量跑三层测试（当前基线：后端 115、前端 79、ai-service 215 用例全绿）。CI 会在每次 push / PR 上自动执行同样的三层测试，并用 Docker Compose 拉起真实依赖跑契约探针（模型密钥以 GitHub Secrets 提供时还会跑端到端）。部署后可运行：
+提交前建议全量跑三层测试（当前基线：后端 121、前端 83、ai-service 220 用例全绿）。CI 会在每次 push / PR 上自动执行同样的三层测试，并用 Docker Compose 拉起真实依赖跑契约探针（模型密钥以 GitHub Secrets 提供时还会跑端到端）。部署后可运行：
 
 ```powershell
 # 端到端：注册 → 建空间 → 建库 → 上传 → 解析 → 问答 → 校验执行轨迹落库

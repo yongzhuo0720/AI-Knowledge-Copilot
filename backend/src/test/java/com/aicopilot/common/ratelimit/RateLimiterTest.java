@@ -3,6 +3,7 @@ package com.aicopilot.common.ratelimit;
 import com.aicopilot.common.cache.CacheService;
 import com.aicopilot.common.cache.InMemoryCacheService;
 import com.aicopilot.common.exception.RateLimitExceededException;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -127,5 +128,31 @@ class RateLimiterTest {
         assertThat(rateLimiter.record("login", "a@b.com", POLICY)).isEqualTo(1);
         assertThat(rateLimiter.record("login", "a@b.com", POLICY)).isEqualTo(2);
         assertThat(rateLimiter.record("login", "a@b.com", POLICY)).isEqualTo(3);
+    }
+
+
+    @Test
+    void countsEveryRejectionByBucket() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        RateLimiter metered = new RateLimiter(cache, registry);
+
+        for (int i = 0; i < 4; i++) {
+            try {
+                metered.consume("ask", "7", POLICY);
+            } catch (RateLimitExceededException expected) {
+                // 第 4 次开始被拒
+            }
+        }
+        // 另一个主体先耗尽配额再扣一次：证明拒绝计数按 bucket 聚合、与主体无关
+        metered.record("ask", "8", POLICY);
+        metered.record("ask", "8", POLICY);
+        metered.record("ask", "8", POLICY);
+        try {
+            metered.consume("ask", "8", POLICY);
+        } catch (RateLimitExceededException expected) {
+            // 已达上限，被拒
+        }
+
+        assertThat(registry.find("aicopilot.ratelimit.rejected").tag("bucket", "ask").counter().count()).isEqualTo(2.0);
     }
 }

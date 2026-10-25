@@ -2,6 +2,9 @@ package com.aicopilot.common.ratelimit;
 
 import com.aicopilot.common.cache.CacheService;
 import com.aicopilot.common.exception.RateLimitExceededException;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -24,9 +27,21 @@ public class RateLimiter {
     private static final String KEY_PREFIX = "rate-limit:";
 
     private final CacheService cacheService;
+    /**
+     * 拒绝计数（{@code aicopilot.ratelimit.rejected}，按 bucket 标签）。
+     * 拒绝量是限流策略健康度的直接信号：长期为 0 说明上限形同虚设，
+     * 突然飙升要么是被刷、要么是策略配错了。单测没传注册表时退化成一次性实例。
+     */
+    private final MeterRegistry meterRegistry;
 
     public RateLimiter(CacheService cacheService) {
+        this(cacheService, new SimpleMeterRegistry());
+    }
+
+    @Autowired
+    RateLimiter(CacheService cacheService, MeterRegistry meterRegistry) {
         this.cacheService = cacheService;
+        this.meterRegistry = meterRegistry;
     }
 
     /**
@@ -39,6 +54,7 @@ public class RateLimiter {
     public void consume(String bucket, String subject, RateLimitProperties.Policy policy) {
         long used = record(bucket, subject, policy);
         if (used > policy.getMaxRequests()) {
+            meterRegistry.counter("aicopilot.ratelimit.rejected", "bucket", bucket).increment();
             throw new RateLimitExceededException(tooManyRequestsMessage(policy));
         }
     }

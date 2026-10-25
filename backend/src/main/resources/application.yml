@@ -33,7 +33,9 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        # prometheus 指标端点只随 8080 暴露在 compose 网络内，
+        # nginx 只反代 / 与 /api，公网访问不到 actuator。
+        include: health,info,prometheus
 
 storage:
   minio:

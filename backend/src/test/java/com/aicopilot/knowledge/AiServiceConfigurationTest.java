@@ -2,6 +2,7 @@ package com.aicopilot.knowledge;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -17,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class AiServiceConfigurationTest {
 
     private HttpServer server;
+    private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
 
     @AfterEach
     void stopServer() {
@@ -101,7 +103,7 @@ class AiServiceConfigurationTest {
         properties.setInternalToken("secret-token");
 
         new AiServiceConfiguration()
-                .knowledgeAnswerClient(properties, new ObjectMapper())
+                .knowledgeAnswerClient(properties, new ObjectMapper(), meterRegistry)
                 .stream(20L, "question", List.of(), content -> {});
 
         assertThat(tokens).containsExactly("secret-token");
@@ -124,6 +126,52 @@ class AiServiceConfigurationTest {
         AiServiceProperties properties = new AiServiceProperties();
         properties.setEnabled(true);
         properties.setBaseUrl("http://127.0.0.1:" + server.getAddress().getPort());
-        return new AiServiceConfiguration().knowledgeAnswerClient(properties, new ObjectMapper());
+        return new AiServiceConfiguration().knowledgeAnswerClient(properties, new ObjectMapper(), meterRegistry);
+    }
+
+    @Test
+    void recordsTimerOutcomeForStreamingCalls() throws IOException {
+        KnowledgeAnswerClient client = streamingClient("""
+                event: complete
+                data: {"answer":"完成","sources":[]}
+
+                """);
+
+        client.stream(20L, "question", List.of(), content -> { });
+
+        io.micrometer.core.instrument.Timer timer = meterRegistry.find("aicopilot.ai.request")
+                .tag("capability", "answer.stream").tag("outcome", "ok").timer();
+        org.assertj.core.api.Assertions.assertThat(timer).isNotNull();
+        org.assertj.core.api.Assertions.assertThat(timer.count()).isEqualTo(1);
+    }
+
+    @Test
+    void recordsErrorOutcomeWhenTheUpstreamFails() throws IOException {
+        KnowledgeAnswerClient client = streamingClient("""
+                event: error
+                data: {"message":"model unavailable"}
+
+                """);
+
+        assertThatThrownBy(() -> client.stream(20L, "question", List.of(), content -> { }))
+                .isInstanceOf(IllegalStateException.class);
+
+        io.micrometer.core.instrument.Timer timer = meterRegistry.find("aicopilot.ai.request")
+                .tag("capability", "answer.stream").tag("outcome", "error").timer();
+        org.assertj.core.api.Assertions.assertThat(timer).isNotNull();
+        org.assertj.core.api.Assertions.assertThat(timer.count()).isEqualTo(1);
+    }
+
+    @Test
+    void doesNotCountDisabledCapabilityAsACall() {
+        AiServiceProperties properties = new AiServiceProperties();
+        properties.setEnabled(false);
+        KnowledgeAnswerClient client = new AiServiceConfiguration()
+                .knowledgeAnswerClient(properties, new ObjectMapper(), meterRegistry);
+
+        // disabled 分支不发生远程调用，也不该被计入能力耗时（否则稀释真实延迟）
+        client.answer(20L, "question", List.of());
+
+        org.assertj.core.api.Assertions.assertThat(meterRegistry.find("aicopilot.ai.request").timers()).isEmpty();
     }
 }
