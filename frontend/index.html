@@ -3,9 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="description" content="AI Knowledge Copilot — 企业知识库 RAG 平台：上传文档自动建立向量索引，混合检索与 Tool Calling Agent 返回带引用的可解释回答。" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>AI Knowledge Copilot</title>
+    <script>
+      // 首帧前解析主题（显式选择优先，否则跟系统），写 data-theme 供样式翻转。
+      // 必须内联在这里而不是打包产物里：等模块加载完再切，用户会先看到一帧浅色。
+      (function () {
+        try {
+          var stored = localStorage.getItem('themePreference')
+          var theme = stored === 'light' || stored === 'dark'
+            ? stored
+            : (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+          document.documentElement.setAttribute('data-theme', theme)
+        } catch (e) { /* localStorage 禁用时按默认浅色 */ }
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>

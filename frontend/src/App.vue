@@ -5,7 +5,8 @@ import { AUTH_CHANGED_EVENT } from '@/services/crossTabSync'
 
 import { logout } from '@/services/api'
 import { clearAuthState } from '@/services/auth'
-import { featherIcon } from '@/services/icons'
+import { MOON_ICON, SUN_ICON, featherIcon } from '@/services/icons'
+import { initTheme, onThemeChange, currentTheme, toggleTheme, type Theme } from '@/services/theme'
 import { useWorkspaceContext } from '@/composables/useWorkspaceContext'
 
 const route = useRoute()
@@ -47,6 +48,12 @@ const BRAND_ICON = featherIcon('<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="
 
 const navIcon = (label: string) => NAV_ICONS[label] ?? NAV_ICONS['总览']
 
+// 主题切换：currentTheme 的解析在 index.html 内联脚本里已做过一次（防闪烁），
+// 这里只是把它变成响应式并在挂载后接管系统偏好监听。
+const theme = ref<Theme>(currentTheme())
+const themeIcon = computed(() => (theme.value === 'dark' ? SUN_ICON : MOON_ICON))
+const themeTitle = computed(() => (theme.value === 'dark' ? '切换到浅色主题' : '切换到深色主题'))
+
 /**
  * 登录态变化时只需要刷新 App 自己的 token 视图；currentUser / workspaces
  * 由 useWorkspaceContext 在同一个事件里同步。未登录则把用户带回登录页。
@@ -65,6 +72,8 @@ async function signOut() {
 
 onMounted(() => {
   window.addEventListener(AUTH_CHANGED_EVENT, syncAuthState)
+  initTheme()
+  onThemeChange((next) => { theme.value = next })
   if (isAuthenticated.value) {
     void loadContext().catch((error) => {
       workspaceError.value = error instanceof Error ? error.message : '工作空间加载失败'
@@ -121,6 +130,7 @@ onBeforeUnmount(() => {
           <strong>{{ routeTitle }}</strong>
         </div>
         <div class="app-user-menu">
+          <button class="ghost-button theme-toggle" type="button" :title="themeTitle" :aria-label="themeTitle" @click="toggleTheme"><span class="theme-icon" v-html="themeIcon" /></button>
           <div class="app-user-copy"><strong>{{ currentUser?.username }}</strong><small>{{ activeWorkspace?.name ?? '未选择工作空间' }}</small></div>
           <span class="user-avatar">{{ currentUser?.username.slice(0, 1).toUpperCase() }}</span>
           <button class="ghost-button" type="button" @click="signOut">退出登录</button>
