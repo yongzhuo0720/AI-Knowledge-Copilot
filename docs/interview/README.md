@@ -19,7 +19,7 @@
 | 混合检索 Hit@1 | **100%**（28 题 · chunk 级判分 · 结构感知切片） | `docs/检索效果评估报告.md` 第十一节 |
 | 切片升级对纯向量的提升 | Hit@1 **60.7% → 78.6%**（+17.9pp），语义分组 87.5% → 100% | 同上 |
 | 新格式文档（xlsx/pptx/csv/html）召回 | **13/13** | 同上 12.6 节 |
-| 测试规模 | 后端 121 · 前端 83（vitest+vue-tsc） · ai-service 220 | 各仓库测试套件 |
+| 测试规模 | 后端 121 · 前端 89（vitest+vue-tsc） · ai-service 220 | 各仓库测试套件 |
 | 端到端验证 | `scripts/e2e_agent.py` 全链路 exit 0；33 项契约探针 | `scripts/verify_c_group.py` |
 | 代码规模 | 本轮优化 8 个提交，45 文件，+1245/−1475（净删 230 行的同时完成三项收敛） | git log 468b221..HEAD |
 
@@ -110,7 +110,7 @@
 | 切片怎么切？ | 结构感知：标题链前缀打进 chunk 正文 + 完整语义单元；配置集中在 `settings.py` |
 | SSE 遇到什么坑？ | Nginx 代理缓冲会把流聚合成一次性返回，需显式关闭；停止生成 = 客户端 abort + 后端不写入残缺回答 |
 | 解析任务怎么做可靠？ | 任务状态机 `ACCEPTED→PROCESSING→COMPLETED/RETRYING/FAILED`；MySQL 条件 UPDATE 乐观抢占；启动恢复 + 指数退避重试；重启后自动恢复未完成任务 |
-| 怎么测的？ | 四层：后端 121（服务层单测）· 前端 83（vitest + vue-tsc）· ai-service 220（pytest）· GitHub Actions CI 自动跑三层测试 + compose e2e（已全绿），部署后再跑 HTTP 全链路脚本 |
+| 怎么测的？ | 四层：后端 121（服务层单测）· 前端 89（vitest + vue-tsc）· ai-service 220（pytest）· GitHub Actions CI 自动跑三层测试 + compose e2e（已全绿），部署后再跑 HTTP 全链路脚本 |
 | DOCX 表格丢失怎么修的？ | python-docx 默认只遍历段落；改用 `iter_inner_content()` 按文档序交错遍历段落与表格，表格行转 `列名: 值` 文本进切片 |
 | 印象最深的 bug？ | 备选：封禁后 token 仍有效（认证≠授权状态）；重排器把 92.9% 降到 89.3%（弱重排器不该有推翻权）；评估集虚高 100%（判分口径错误会直接变成错误的工程结论）；**MinIO 官方撤源**（Docker Hub 删库/quay 401/dl.min.io 410，本地旧镜像层掩盖了「全新环境必挂」，最终从 GitHub Releases 自建镜像消掉第三方依赖） |
 | 线上怎么观测？ | `/actuator/prometheus`（仅 compose 内网可达）：`aicopilot_ai_request_seconds{capability,outcome}` 看每个 AI 能力的 P95 与失败率，`aicopilot_ratelimit_rejected{bucket}` 看限流拒绝；ai-service 解析按阶段打耗时日志（下载/切片/索引） |

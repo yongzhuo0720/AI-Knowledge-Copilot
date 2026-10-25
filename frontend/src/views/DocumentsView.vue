@@ -59,6 +59,9 @@ function stageTextOf(document: WorkspaceDocument) {
 const UPLOAD_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>'
 const INBOX_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>'
 
+/** 任务状态机的终态。到达后不会再自发回到处理中（重试是用户显式触发的独立端点）。 */
+const TERMINAL_STATUSES = new Set(['COMPLETED', 'FAILED'])
+
 const statusOptions = [
   { value: 'ALL', label: '全部状态' },
   { value: 'PROCESSING', label: '处理中' },
@@ -135,7 +138,12 @@ async function refresh(document: WorkspaceDocument, silent = false) {
   try {
     const response = await refreshDocumentProcessingStatus(document.knowledgeBaseId, document.id)
     // 轮询/手动查询回来时文档可能已被删除或换行：按 id 找不到就丢弃
-    if (!documents.value.some((item) => item.id === document.id)) return
+    const existing = documents.value.find((item) => item.id === document.id)
+    if (!existing) return
+    // 轮询同时发「列表刷新」和「单行任务刷新」两个请求，返回顺序不确定。
+    // 任务快照更旧时（读到 PROCESSING、列表已读到 COMPLETED）直接合并会把终态行
+    // 拉回「处理中」，进度条闪回、轮询多跑一轮。终态是单调的，守住它即可。
+    if (TERMINAL_STATUSES.has(existing.status)) return
     documents.value = documents.value.map((item) => item.id === document.id ? { ...item, ...response.data, knowledgeBaseName: document.knowledgeBaseName } : item)
   } catch (error) {
     if (!silent) message.value = error instanceof Error ? error.message : '查询状态失败'
@@ -210,7 +218,7 @@ onMounted(async () => {
     // 列表刷新兜状态流转（COMPLETED 等）；单行刷新兜阶段进度——进度只存在于
     // ai-service 的任务响应里，列表接口（只读 MySQL）拿不到。
     void loadDocuments(true)
-    for (const document of pending) void refresh(document, true)
+    for (const item of pending) void refresh(item, true)
   }, POLL_INTERVAL)
   loading.value = true
   try { await loadContext() }

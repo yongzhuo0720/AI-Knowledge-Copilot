@@ -255,7 +255,7 @@ npm run build
 
 ## 验证清单
 
-提交前建议全量跑三层测试（当前基线：后端 121、前端 83、ai-service 220 用例全绿）。CI 会在每次 push / PR 上自动执行同样的三层测试，并用 Docker Compose 拉起真实依赖跑契约探针（模型密钥以 GitHub Secrets 提供时还会跑端到端）。部署后可运行：
+提交前建议全量跑三层测试（当前基线：后端 121、前端 89、ai-service 220 用例全绿）。CI 会在每次 push / PR 上自动执行同样的三层测试，并用 Docker Compose 拉起真实依赖跑契约探针（模型密钥以 GitHub Secrets 提供时还会跑端到端）。部署后可运行：
 
 ```powershell
 # 端到端：注册 → 建空间 → 建库 → 上传 → 解析 → 问答 → 校验执行轨迹落库
