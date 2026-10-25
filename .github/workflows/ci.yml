@@ -73,8 +73,17 @@ jobs:
             echo "DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}"
             echo "DASHSCOPE_API_KEY=${{ secrets.DASHSCOPE_API_KEY }}"
           } >> deploy/.env
-      - name: Build and start the full stack
-        run: docker compose --env-file ./deploy/.env -f ./deploy/docker-compose.yml up -d --build
+      # 构建与启动拆成两个 step：失败时步骤状态本身就能区分「镜像构建挂」还是「起容器挂」
+      - name: Build images
+        run: docker compose --env-file ./deploy/.env -f ./deploy/docker-compose.yml build --progress=plain
+      - name: Start the full stack
+        run: docker compose --env-file ./deploy/.env -f ./deploy/docker-compose.yml up -d
+      - name: Preflight diagnostics
+        if: always()
+        run: |
+          docker version
+          docker compose --env-file ./deploy/.env -f ./deploy/docker-compose.yml ps -a || true
+          free -h || true
       - name: Wait for every core container to turn healthy
         run: |
           for i in $(seq 1 60); do
