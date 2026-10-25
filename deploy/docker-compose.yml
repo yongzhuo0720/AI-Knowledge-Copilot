@@ -191,6 +191,9 @@ services:
         condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:9091/healthz"]
+      # Milvus standalone 冷启动实测 60-90s（慢磁盘上更久）；start_period 内的
+      # 失败不计入 retries，避免「刚启动就被判死 → restart → 再判死」的循环。
+      start_period: 120s
       interval: 10s
       timeout: 5s
       retries: 18

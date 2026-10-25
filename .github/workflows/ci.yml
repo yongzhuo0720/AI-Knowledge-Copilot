@@ -76,8 +76,23 @@ jobs:
       # 构建与启动拆成两个 step：失败时步骤状态本身就能区分「镜像构建挂」还是「起容器挂」
       - name: Build images
         run: docker compose --env-file ./deploy/.env -f ./deploy/docker-compose.yml build --progress=plain
+      # up 可重试：共享 runner 的 IP 池偶尔撞上镜像仓库的拉取限流，等一会儿再试就能过
       - name: Start the full stack
-        run: docker compose --env-file ./deploy/.env -f ./deploy/docker-compose.yml up -d
+        run: |
+          set -o pipefail
+          for attempt in 1 2 3; do
+            echo "attempt $attempt"
+            if docker compose --env-file ./deploy/.env -f ./deploy/docker-compose.yml up -d 2>&1 | tee /tmp/up.log; then
+              exit 0
+            fi
+            sleep 30
+          done
+          exit 1
+      # 失败时把 up 的最后 30 行重新发射成 error 注解——注解 API 无需登录即可读，
+      # 这一步让「起不来」的原因在 API 层可见，不再依赖登录取日志
+      - name: Surface start failure as annotations
+        if: failure()
+        run: tail -30 /tmp/up.log 2>/dev/null | while IFS= read -r line; do echo "::error::$line"; done
       - name: Preflight diagnostics
         if: always()
         run: |
