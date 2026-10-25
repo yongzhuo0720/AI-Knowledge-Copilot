@@ -362,6 +362,26 @@ def _identifier_tokens(query: str) -> set[str]:
     }
 
 
+def _lexical_bonus(query: str, content: str) -> tuple[float, float]:
+    """（标识符覆盖率, 整串命中）两个加法提权信号。
+
+    抽成独立函数供三条重排路径共用：本地保守提权、DashScope、generic。
+    标识符命中（错误码 / 型号 / 版本号）是最强判别信号 —— 实测连真 Cross-Encoder
+    都会把它排错（换说法题集上 +25pp Hit@1 的同时，主评估集的 "ERROR 1215"
+    被语义分从 #1 压到 #3）。所以远端精排的分数**必须**叠加这个加成，
+    而不是直接采用：没有标识符的查询加成恒为 0，等于纯 CE 排序；
+    有标识符的查询由精确命中守住名次 —— 加法结构保证任何一路都不会退化。
+    """
+    identifier_tokens = _identifier_tokens(query)
+    identifier_bonus = 0.0
+    if identifier_tokens:
+        document_tokens = set(tokenize(content))
+        identifier_bonus = len(identifier_tokens & document_tokens) / len(identifier_tokens)
+    normalized_query = re.sub(r"\s+", "", query).lower()
+    phrase_bonus = 1.0 if normalized_query and normalized_query in re.sub(r"\s+", "", content).lower() else 0.0
+    return identifier_bonus, phrase_bonus
+
+
 def rerank_features(
     query: str,
     candidates: list[dict[str, object]],
@@ -385,18 +405,12 @@ def rerank_features(
     查询里有标识符（错误码、型号、版本号）时，命中它的片段被抬上来，
     这正是关键词召回存在的意义。
     """
-    identifier_tokens = _identifier_tokens(query)
-    normalized_query = re.sub(r"\s+", "", query).lower()
     rescored: list[dict[str, object]] = []
 
     for candidate in candidates:
         content = str(candidate.get("content") or "")
         prior = float(candidate.get("score") or 0.0)  # 归一化到 [0,1] 的融合分
-        identifier_bonus = 0.0
-        if identifier_tokens:
-            document_tokens = set(tokenize(content))
-            identifier_bonus = len(identifier_tokens & document_tokens) / len(identifier_tokens)
-        phrase_bonus = 1.0 if normalized_query and normalized_query in re.sub(r"\s+", "", content).lower() else 0.0
+        identifier_bonus, phrase_bonus = _lexical_bonus(query, content)
         final = prior + IDENTIFIER_WEIGHT * identifier_bonus + PHRASE_WEIGHT * phrase_bonus
         rescored.append({
             **candidate,
@@ -419,8 +433,90 @@ def rerank_features(
     return rescored
 
 
+def _apply_cross_encoder_scores(
+    query: str,
+    candidates: list[dict[str, object]],
+    scores_by_index: dict[int, float],
+    top_n: int,
+) -> list[dict[str, object]]:
+    """把 Cross-Encoder 分数与标识符加成做**加法组合**后重排。
+
+    直接按 CE 分数排序会在含编号/型号的查询上退化（见 ``_lexical_bonus`` 的实测记录），
+    所以最终分是 ``CE 分 + 标识符加成 + 整串加成``：无标识符查询加成为 0，
+    排序等于纯 CE；有标识符查询由精确命中守住。展示分数按最高分缩放到 [0,1]。
+    """
+    scored: list[tuple[float, dict[str, object]]] = []
+    for position, relevance in scores_by_index.items():
+        candidate = candidates[position]
+        content = str(candidate.get("content") or "")
+        identifier_bonus, phrase_bonus = _lexical_bonus(query, content)
+        final = relevance + IDENTIFIER_WEIGHT * identifier_bonus + PHRASE_WEIGHT * phrase_bonus
+        scored.append((final, {
+            **candidate,
+            "rerank_score": round(final, 4),
+            "cross_encoder_score": round(relevance, 4),
+            "identifier_coverage": round(identifier_bonus, 4),
+        }))
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+    rescored = [candidate for _, candidate in scored[:top_n]]
+    ceiling = max((score for score, _ in scored[:top_n]), default=0.0)
+    for item in rescored:
+        scaled = float(item["rerank_score"]) / ceiling if ceiling > 0 else 0.0
+        item["score"] = round(max(0.0, min(scaled, 1.0)), 4)
+    return rescored or candidates[:top_n]
+
+
+def _dashscope_rerank(query: str, candidates: list[dict[str, object]], top_n: int) -> list[dict[str, object]]:
+    """阿里百炼（DashScope）原生的文本重排端点，模型 gte-rerank-v2。
+
+    选它而不是「自建 bge-reranker + generic 端点」的理由：
+    1. 与 embedding 用**同一把 DASHSCOPE_API_KEY**，不新增供应商、不新增部署件；
+    2. 响应的 ``output.results`` 已按 relevance_score 降序，直接按 index 回填即可。
+
+    注意 ``results`` 可能少于输入的候选数（服务端会截掉极低分项），
+    所以重排后的列表允许比 top_n 短 —— 宁缺毋滥比凑数更符合「引用来源」的语义。
+    """
+    import json
+    from urllib.request import Request, urlopen
+
+    base = (settings.rerank_base_url or "https://dashscope.aliyuncs.com").rstrip("/")
+    payload = {
+        "model": settings.rerank_model,
+        "input": {
+            "query": query,
+            "documents": [str(candidate.get("content") or "") for candidate in candidates],
+        },
+        "parameters": {"top_n": top_n, "return_documents": False},
+    }
+    request = Request(
+        f"{base}/api/v1/services/rerank/text-rerank/text-rerank",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Authorization": f"Bearer {settings.rerank_api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urlopen(request, timeout=30) as response:
+        body = json.load(response)
+    results = (body.get("output") or {}).get("results") or []
+    scores_by_index: dict[int, float] = {}
+    for item in results[:top_n]:
+        position = int(item.get("index", -1))
+        if 0 <= position < len(candidates):
+            scores_by_index[position] = float(item.get("relevance_score", 0.0))
+    # 返回空说明服务端认为没有任何候选相关；此时退回融合序，让上层决定怎么展示。
+    if not scores_by_index:
+        return candidates[:top_n]
+    return _apply_cross_encoder_scores(query, candidates, scores_by_index, top_n)
+
+
 def _api_rerank(query: str, candidates: list[dict[str, object]], top_n: int) -> list[dict[str, object]]:
-    """调用外部重排服务（Cohere / Jina / bge-reranker 兼容的 /rerank 接口）。"""
+    """调用外部重排服务：按 provider 分发到百炼原生端点或 Cohere 兼容端点。"""
+    if settings.rerank_provider.lower() == "dashscope":
+        return _dashscope_rerank(query, candidates, top_n)
+    return _generic_rerank(query, candidates, top_n)
+
+
+def _generic_rerank(query: str, candidates: list[dict[str, object]], top_n: int) -> list[dict[str, object]]:
+    """Cohere / Jina / bge-reranker 兼容的 /rerank 接口。"""
     import json
     from urllib.request import Request, urlopen
 
@@ -439,16 +535,23 @@ def _api_rerank(query: str, candidates: list[dict[str, object]], top_n: int) -> 
     with urlopen(request, timeout=30) as response:
         body = json.load(response)
     results = body.get("results") or body.get("data") or []
-    reranked: list[dict[str, object]] = []
+    scores_by_index: dict[int, float] = {}
     for item in results[:top_n]:
-        position = int(item.get("index", 0))
+        position = int(item.get("index", -1))
         if 0 <= position < len(candidates):
-            reranked.append({
-                **candidates[position],
-                "score": round(float(item.get("relevance_score", 0.0)), 4),
-                "rerank_score": round(float(item.get("relevance_score", 0.0)), 4),
-            })
-    return reranked or candidates[:top_n]
+            scores_by_index[position] = float(item.get("relevance_score", 0.0))
+    if not scores_by_index:
+        return candidates[:top_n]
+    return _apply_cross_encoder_scores(query, candidates, scores_by_index, top_n)
+
+
+def _remote_rerank_available() -> bool:
+    """远端重排是否可用：provider=dashscope 只要求 key；generic 还要求自备 base_url。"""
+    if not settings.rerank_api_key:
+        return False
+    if settings.rerank_provider.lower() == "dashscope":
+        return True
+    return bool(settings.rerank_base_url)
 
 
 def rerank(query: str, candidates: list[dict[str, object]], top_n: int) -> list[dict[str, object]]:
@@ -459,7 +562,7 @@ def rerank(query: str, candidates: list[dict[str, object]], top_n: int) -> list[
     """
     if not candidates:
         return []
-    if settings.rerank_enabled and settings.rerank_api_key and settings.rerank_base_url:
+    if settings.rerank_enabled and _remote_rerank_available():
         try:
             return _api_rerank(query, candidates, top_n)
         except Exception:

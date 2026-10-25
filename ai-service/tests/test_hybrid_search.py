@@ -394,3 +394,121 @@ def test_finalize_truncates_preview_and_assigns_rank(fake_store) -> None:
     hits = hybrid_search.hybrid_retrieve(1, "Flyway", 2, "keyword")
     assert [hit["rank"] for hit in hits] == list(range(1, len(hits) + 1))
     assert all(len(str(hit["preview"])) <= 240 for hit in hits)
+
+
+# --------------------------------------------------------------------------- #
+# 远端 Cross-Encoder 重排（DashScope gte-rerank / generic Cohere 兼容）
+# --------------------------------------------------------------------------- #
+
+import io
+
+
+def _candidates(*keys: str) -> list[dict[str, object]]:
+    return [
+        {"document_object_key": key, "content": f"内容 {key}", "score": 0.9 - index * 0.1, "retriever": "hybrid"}
+        for index, key in enumerate(keys)
+    ]
+
+
+class _FakeResponse(io.BytesIO):
+    """BytesIO 本身就支持 with 协议（生产代码用 ``with urlopen(...) as r: json.load(r)``）。"""
+
+
+def _fake_urlopen(responses: list[dict] | Exception):
+    """替换 urllib.request.urlopen：返回预设响应或抛错。记录收到的请求体供断言。"""
+    import json as jsonlib
+
+    calls: list[dict] = []
+
+    def urlopen(request, timeout=None):
+        if isinstance(responses, Exception):
+            raise responses
+        calls.append({
+            "url": request.full_url,
+            "body": jsonlib.loads(request.data.decode("utf-8")),
+        })
+        return _FakeResponse(jsonlib.dumps(responses.pop(0)).encode("utf-8"))
+
+    return urlopen, calls
+
+
+def test_dashscope_rerank_reorders_by_relevance_score(monkeypatch) -> None:
+    urlopen, calls = _fake_urlopen([{
+        "output": {"results": [
+            {"index": 2, "relevance_score": 0.97},
+            {"index": 0, "relevance_score": 0.41},
+        ]},
+        "request_id": "r-1",
+    }])
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    monkeypatch.setattr(hybrid_search.settings, "rerank_provider", "dashscope")
+    monkeypatch.setattr(hybrid_search.settings, "rerank_api_key", "sk-test")
+    monkeypatch.setattr(hybrid_search.settings, "rerank_model", "gte-rerank-v2")
+    monkeypatch.setattr(hybrid_search.settings, "rerank_base_url", "")
+
+    reranked = hybrid_search.rerank("口语化的问题", _candidates("a.md", "b.md", "c.md"), 3)
+
+    assert [item["document_object_key"] for item in reranked] == ["c.md", "a.md"]
+    # 无标识符查询：加成为 0，排序等于纯 CE；展示分数按最高分缩放
+    assert reranked[0]["cross_encoder_score"] == 0.97
+    assert reranked[0]["score"] == 1.0
+    # 请求打到百炼原生端点，且文档以 content 形式传入 input.documents
+    assert calls[0]["url"].endswith("/api/v1/services/rerank/text-rerank/text-rerank")
+    assert calls[0]["body"]["model"] == "gte-rerank-v2"
+    assert calls[0]["body"]["input"]["query"] == "口语化的问题"
+    assert calls[0]["body"]["input"]["documents"] == ["内容 a.md", "内容 b.md", "内容 c.md"]
+
+
+def test_remote_rerank_failure_falls_back_to_local_heuristic(monkeypatch) -> None:
+    urlopen, _calls = _fake_urlopen(RuntimeError("dashscope down"))
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    monkeypatch.setattr(hybrid_search.settings, "rerank_provider", "dashscope")
+    monkeypatch.setattr(hybrid_search.settings, "rerank_api_key", "sk-test")
+
+    # 远端挂了不能拖垮检索：退回本地保守提权（这里查询带标识符，走提权路径）
+    reranked = hybrid_search.rerank("ERROR 1451", _candidates("a.md", "b.md"), 2)
+
+    assert len(reranked) == 2
+    assert all("rerank_score" in item for item in reranked)
+
+
+def test_dashscope_provider_needs_only_api_key(monkeypatch) -> None:
+    monkeypatch.setattr(hybrid_search.settings, "rerank_api_key", "sk-test")
+    monkeypatch.setattr(hybrid_search.settings, "rerank_base_url", "")
+
+    monkeypatch.setattr(hybrid_search.settings, "rerank_provider", "dashscope")
+    assert hybrid_search._remote_rerank_available() is True
+
+    monkeypatch.setattr(hybrid_search.settings, "rerank_provider", "generic")
+    assert hybrid_search._remote_rerank_available() is False, "generic 还要求自备 base_url"
+
+    monkeypatch.setattr(hybrid_search.settings, "rerank_api_key", "")
+    monkeypatch.setattr(hybrid_search.settings, "rerank_provider", "dashscope")
+    assert hybrid_search._remote_rerank_available() is False, "没有 key 一律视为不可用"
+
+
+def test_cross_encoder_cannot_override_exact_identifier_match(monkeypatch) -> None:
+    """主评估集实测到的回归钉住：CE 把含编号的精确命中压到 #3（100% → 92.9% Hit@1）。
+
+    修法是加法组合 —— CE 分 + 标识符加成。这条测试守的是「精确命中不许被语义分推翻」。
+    """
+    urlopen, _calls = _fake_urlopen([{
+        "output": {"results": [
+            {"index": 1, "relevance_score": 0.90},  # 语义相近但不含编号
+            {"index": 0, "relevance_score": 0.75},  # 字面含 ERROR 1215
+        ]},
+    }])
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+    monkeypatch.setattr(hybrid_search.settings, "rerank_provider", "dashscope")
+    monkeypatch.setattr(hybrid_search.settings, "rerank_api_key", "sk-test")
+
+    candidates = [
+        {"document_object_key": "a.md", "content": "ERROR 1215 表示外键约束创建失败，先检查两张表的字段类型", "score": 0.5, "retriever": "hybrid"},
+        {"document_object_key": "b.md", "content": "数据库报错时按通用排查流程先看日志再复现", "score": 0.5, "retriever": "hybrid"},
+    ]
+
+    reranked = hybrid_search.rerank("ERROR 1215 报错怎么排查", candidates, 2)
+
+    assert reranked[0]["document_object_key"] == "a.md", "标识符加成必须把精确命中抬回第一"
+    assert reranked[0]["identifier_coverage"] == 1.0
+

@@ -136,12 +136,13 @@ def test_summarize_computes_mrr_and_hit1() -> None:
 # --------------------------------------------------------------------------- #
 
 def test_modes_include_rewrite_so_it_is_compared_in_the_same_table() -> None:
-    """改写（Multi-Query）必须和另外三档并排跑。
+    """改写（Multi-Query）与远端重排必须和另外几档并排跑。
 
-    如果给它另开一张表、另跑一批题，那「改写有没有用」就变成了两次不同实验的对比，
-    说服力会大打折扣。这条断言钉住的是「它在同一个 MODES 里」。
+    如果给它们另开一张表、另跑一批题，那「有没有用」就变成了两次不同实验的对比，
+    说服力会大打折扣。这条断言钉住的是「它们在同一个 MODES 里」。
+    （没配远端 key 时 evaluate() 会把 rerank 列摘掉，避免静默退化成 hybrid 假数据。）
     """
-    assert evaluate_retrieval.MODES == ("vector", "keyword", "hybrid", "rewrite")
+    assert list(evaluate_retrieval.MODES) == ["vector", "keyword", "hybrid", "rewrite", "rerank"]
 
 
 def test_better_treats_a_miss_as_the_worst_outcome() -> None:

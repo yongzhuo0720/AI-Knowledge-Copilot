@@ -60,9 +60,12 @@ class Settings(BaseSettings):
     chunk_size: int = 800
     # 仅当单个块自身超过 chunk_size 时才启用的滑窗重叠长度
     chunk_overlap: int = 120
-    # 重排开关。配了 rerank_api_key + rerank_base_url 时优先走远端 Cross-Encoder，
+    # 重排开关。配了 rerank_api_key 时优先走远端 Cross-Encoder，
     # 否则退回本地「标识符加法提权」——它只提权、不重排序，因此不会让融合结果变差。
     rerank_enabled: bool = True
+    # generic: Cohere/Jina 兼容的 {base_url}/rerank（通用但需自备服务）
+    # dashscope: 阿里百炼 gte-rerank 原生端点（与 embedding 同一密钥体系，无需额外开通）
+    rerank_provider: str = "generic"
     rerank_base_url: str = ""
     rerank_api_key: str = ""
     rerank_model: str = "bge-reranker-v2-m3"

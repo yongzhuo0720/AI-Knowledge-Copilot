@@ -41,6 +41,7 @@ MRR      —— 第一个正确片段的排名倒数均值。衡量「排得够�
 只看 MRR 又会漏掉完全没召回的情况，所以两个都要看。
 """
 
+import contextlib
 import json
 import os
 import sys
@@ -52,12 +53,30 @@ from app.eval_judging import rank_of_first_match as _rank_of_first_match  # noqa
 from app.eval_judging import span_alternatives as _span_alternatives  # noqa: E402
 from app.eval_judging import summarize as _summarize  # noqa: E402
 from app.hybrid_search import hybrid_retrieve, multi_query_retrieve  # noqa: E402
+from app.settings import settings  # noqa: E402
 from app.query_rewrite import rewrite_query  # noqa: E402
 
 # ``rewrite`` 是「hybrid + 查询改写」这一档。把它并进 MODES 而不是另开一张表，
 # 是为了让「改写到底有没有带来提升」和既有的三档在**同一批题、同一套判分**下直接可比。
-MODES = ("vector", "keyword", "hybrid", "rewrite")
+MODES = ["vector", "keyword", "hybrid", "rewrite", "rerank"]
 DEFAULT_QUESTIONS = Path(__file__).resolve().parents[2] / "docs" / "rag-eval" / "questions.json"
+
+
+@contextlib.contextmanager
+def _remote_rerank(active: bool):
+    """按评估模式临时切换远端 Cross-Encoder 的可用性，退出时恢复。
+
+    基线列（hybrid / rewrite）必须和生产默认态一致：rerank_enabled=True 但没配远端
+    key —— 走本地保守提权。直接把 key 留在环境里跑，基线会被远端污染，
+    「重排有没有用」这个对照实验就不成立了。
+    """
+    saved = settings.rerank_api_key
+    if not active:
+        settings.rerank_api_key = ""
+    try:
+        yield
+    finally:
+        settings.rerank_api_key = saved
 
 # 判分口径（_span_alternatives / _rank_of_first_match / _summarize）统一放在
 # app/eval_judging.py，与 scripts/verify_index.py 共用同一份实现 —— 如果两边各写一份，
@@ -73,6 +92,12 @@ def evaluate(
     per_question: list[dict] = []
     rewrites_log: list[dict] = []
 
+    remote_ready = bool(settings.rerank_api_key)
+    if not remote_ready:
+        # 没配远端 key 时 rerank 列会静默退化成 hybrid（本地提权），那列数字就是误导。
+        # 宁可少一列，也不要一列假的。
+        MODES.remove("rerank")
+
     for item in questions:
         row: dict[str, object] = {"question": item["question"], "kind": item.get("kind", "semantic")}
         rewrites: list[str] = []
@@ -83,9 +108,15 @@ def evaluate(
                 # 不可复现，不存档的话「模型当时改写成什么样」这个关键输入就丢了，
                 # 数字既无法解释也无法回看。走的仍然是生产那一个 rewrite_query。
                 rewrites = rewrite_query(item["question"])
-                hits = multi_query_retrieve(knowledge_base_id, item["question"], top_k, "hybrid", rewrites=rewrites)
+                with _remote_rerank(False):
+                    hits = multi_query_retrieve(knowledge_base_id, item["question"], top_k, "hybrid", rewrites=rewrites)
+            elif mode == "rerank":
+                # hybrid 同款链路，唯一差别是远端 Cross-Encoder 参与精排。
+                with _remote_rerank(True):
+                    hits = hybrid_retrieve(knowledge_base_id, item["question"], top_k, "hybrid")
             else:
-                hits = hybrid_retrieve(knowledge_base_id, item["question"], top_k, mode)
+                with _remote_rerank(False):
+                    hits = hybrid_retrieve(knowledge_base_id, item["question"], top_k, mode)
             rank = _rank_of_first_match(hits, _span_alternatives(item))
             raw[mode].append({"rank": rank, "kind": row["kind"]})
             row[mode] = rank
@@ -150,7 +181,7 @@ def main() -> None:
     print(f"评估集：{payload.get('name', questions_path.name)}")
     print(f"知识库：{knowledge_base_id}    题目数：{len(questions)}    Top-K：{top_k}")
     print("判分方式：chunk 级 —— 同一片段需命中 answer_span 的全部字面串，或 answer_any 的任一备选")
-    print("模式说明：vector 纯向量 / keyword 纯 BM25 / hybrid 混合检索 / rewrite 混合检索 + 查询改写")
+    print("模式说明：vector 纯向量 / keyword 纯 BM25 / hybrid 混合检索 / rewrite 混合检索 + 查询改写 / rerank 混合检索 + 远端 Cross-Encoder 精排")
 
     overall, by_kind, per_question, rewrites_log = evaluate(questions, knowledge_base_id, top_k)
 

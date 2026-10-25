@@ -67,6 +67,12 @@ services:
       AI_SERVICE_TASK_PROCESSING_STALE_SECONDS: 300
       AI_SERVICE_CHAT_API_KEY: ${DEEPSEEK_API_KEY}
       AI_SERVICE_EMBEDDING_API_KEY: ${DASHSCOPE_API_KEY}
+      # 远端 Cross-Encoder 精排（gte-rerank-v2，与 embedding 同一密钥）。
+      # 换说法题集实测 Hit@1 41.7%→66.7%；启用前务必先在主评估集复测加法组合版
+      # 不回归（见 docs/检索效果评估报告.md 第十三节），再把下面三行注释打开。
+      # AI_SERVICE_RERANK_PROVIDER: dashscope
+      # AI_SERVICE_RERANK_API_KEY: ${DASHSCOPE_API_KEY}
+      # AI_SERVICE_RERANK_MODEL: gte-rerank-v2
       # 健康检查接口不校验 Token，其余接口必须带 X-Internal-Token。
       AI_SERVICE_INTERNAL_TOKEN: ${AI_SERVICE_INTERNAL_TOKEN}
     depends_on:
