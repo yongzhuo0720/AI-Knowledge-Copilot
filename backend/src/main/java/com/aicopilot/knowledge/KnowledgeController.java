@@ -119,7 +119,11 @@ public class KnowledgeController {
             @PathVariable Long documentId,
             HttpServletRequest httpRequest
     ) {
-        return ApiResponse.success(knowledgeService.reparseDocument(authenticatedUserId(httpRequest), knowledgeBaseId, documentId));
+        Long userId = authenticatedUserId(httpRequest);
+        // 重新解析会重新走一遍 Embedding，成本与上传同一量级，必须占上传桶的配额 ——
+        // 否则它就是一个绕过限流的免费重刷入口。
+        consumeQuota(UPLOAD_BUCKET, userId, rateLimitProperties.getUpload());
+        return ApiResponse.success(knowledgeService.reparseDocument(userId, knowledgeBaseId, documentId));
     }
 
     @PostMapping("/{knowledgeBaseId}/documents/{documentId}/processing-retry")
@@ -129,7 +133,9 @@ public class KnowledgeController {
             @PathVariable Long documentId,
             HttpServletRequest httpRequest
     ) {
-        return ApiResponse.success(knowledgeService.retryDocumentProcessing(authenticatedUserId(httpRequest), knowledgeBaseId, documentId));
+        Long userId = authenticatedUserId(httpRequest);
+        consumeQuota(UPLOAD_BUCKET, userId, rateLimitProperties.getUpload());
+        return ApiResponse.success(knowledgeService.retryDocumentProcessing(userId, knowledgeBaseId, documentId));
     }
 
     @DeleteMapping("/{knowledgeBaseId}/documents/{documentId}")

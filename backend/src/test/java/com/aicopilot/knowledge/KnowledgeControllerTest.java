@@ -71,6 +71,55 @@ class KnowledgeControllerTest {
         verify(rateLimiter).consume("upload", "7", properties.getUpload());
     }
 
+    @Test
+    void chargesUploadQuotaWhenReparsing() {
+        when(knowledgeService.reparseDocument(7L, 20L, 30L)).thenReturn(document());
+
+        controller.reparseDocument(20L, 30L, authenticatedRequest(7L));
+
+        // 重新解析同样会重跑 Embedding，必须和上传共用同一个桶
+        verify(rateLimiter).consume("upload", "7", properties.getUpload());
+        verify(knowledgeService).reparseDocument(7L, 20L, 30L);
+    }
+
+    @Test
+    void rejectsReparseWithoutTouchingTheServiceWhenQuotaIsExhausted() {
+        doThrow(new RateLimitExceededException("too many requests"))
+                .when(rateLimiter).consume(any(), any(), any());
+
+        assertThatThrownBy(() -> controller.reparseDocument(20L, 30L, authenticatedRequest(7L)))
+                .isInstanceOf(RateLimitExceededException.class);
+
+        verifyNoInteractions(knowledgeService);
+    }
+
+    @Test
+    void chargesUploadQuotaWhenRetryingProcessing() {
+        when(knowledgeService.retryDocumentProcessing(7L, 20L, 30L)).thenReturn(document());
+
+        controller.retryDocumentProcessing(20L, 30L, authenticatedRequest(7L));
+
+        verify(rateLimiter).consume("upload", "7", properties.getUpload());
+        verify(knowledgeService).retryDocumentProcessing(7L, 20L, 30L);
+    }
+
+    @Test
+    void rejectsRetryWithoutTouchingTheServiceWhenQuotaIsExhausted() {
+        doThrow(new RateLimitExceededException("too many requests"))
+                .when(rateLimiter).consume(any(), any(), any());
+
+        assertThatThrownBy(() -> controller.retryDocumentProcessing(20L, 30L, authenticatedRequest(7L)))
+                .isInstanceOf(RateLimitExceededException.class);
+
+        verifyNoInteractions(knowledgeService);
+    }
+
+    private KnowledgeDocumentResponse document() {
+        return new KnowledgeDocumentResponse(
+                30L, 20L, "guide.pdf", "kb/20/u/guide.pdf", "application/pdf", 1L,
+                "ACCEPTED", "task-1", java.time.Instant.now());
+    }
+
     private HttpServletRequest authenticatedRequest(Long userId) {
         HttpServletRequest request = mock(HttpServletRequest.class);
         when(request.getAttribute(AuthenticationInterceptor.AUTHENTICATED_USER_ID)).thenReturn(userId);

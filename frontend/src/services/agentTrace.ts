@@ -19,6 +19,8 @@ export const RESULT_UNITS: Record<string, string> = {
   knowledge_search: '片',
   list_documents: '篇',
   document_outline: '小节',
+  // 降级步骤的 result_count 是「检索直答」拿到的来源数，同样以「片」计
+  fallback: '片',
 }
 
 /**

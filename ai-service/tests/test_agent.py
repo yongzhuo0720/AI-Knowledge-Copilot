@@ -46,9 +46,10 @@ def test_agent_falls_back_to_retrieval_answer_without_chat_key(monkeypatch) -> N
     result = agent.run_knowledge_agent(1, "如何发布？", [])
 
     assert result["answer"] == "检索到的回答"
+    # 降级本身必须如实标注：伪造一条 knowledge_search 会让轨迹看起来像正常走完了工具链
     assert result["steps"] == [{
-        "tool": "knowledge_search",
-        "query": "检索「如何发布？」，取前 5 片",
+        "tool": "fallback",
+        "query": "降级：未配置模型密钥，改为检索直答",
         "result_count": 1,
     }]
 
@@ -68,10 +69,45 @@ def test_agent_falls_back_when_tool_call_api_fails(monkeypatch) -> None:
 
     assert result["answer"] == "普通回答已返回"
     assert result["steps"] == [{
-        "tool": "knowledge_search",
-        "query": "检索「如何发布？」，取前 5 片",
+        "tool": "fallback",
+        "query": "降级：工具调用失败（RuntimeError），改为检索直答",
         "result_count": 1,
     }]
+
+
+def test_fallback_keeps_the_real_trace_instead_of_faking_a_search(monkeypatch) -> None:
+    """先成功列过文档，下一轮模型调用超时：已执行的步骤必须保留。
+
+    曾经的实现会把整条轨迹替换成一条 knowledge_search —— 已经跑成功的工具、
+    失败发生在哪一步全被抹掉，只剩下一个看起来「检索成功」的假象。
+    """
+    monkeypatch.setattr(agent.settings, "chat_api_key", "test-key")
+    responses = iter([_assistant_with_tool_calls(_tool_call("call-1", "list_documents"))])
+
+    def fake_chat_completion(messages, tools):
+        try:
+            return next(responses)
+        except StopIteration:
+            raise TimeoutError("model request timed out")
+
+    monkeypatch.setattr(agent, "_chat_completion", fake_chat_completion)
+    monkeypatch.setattr(agent_tools, "document_inventory", lambda knowledge_base_id: {"kb/1/a.md": 2, "kb/1/b.md": 1})
+    monkeypatch.setattr(agent_tools, "document_preview_chunks", lambda knowledge_base_id, document, limit: [])
+    monkeypatch.setattr(agent, "answer_question", lambda knowledge_base_id, question, history: {
+        "answer": "降级回答",
+        "sources": [{"document_object_key": "kb/1/a.md", "content": "资料", "score": 0.9}],
+    })
+
+    result = agent.run_knowledge_agent(1, "知识库里有什么？", [])
+
+    assert [step["tool"] for step in result["steps"]] == ["list_documents", "fallback"]
+    assert result["steps"][0] == {
+        "tool": "list_documents",
+        "query": "列出知识库中的全部文档",
+        "result_count": 2,
+    }
+    assert "TimeoutError" in result["steps"][1]["query"], "降级步骤要写清楚真实失败类型"
+    assert result["answer"] == "降级回答"
 
 
 # --------------------------------------------------------------------------- #

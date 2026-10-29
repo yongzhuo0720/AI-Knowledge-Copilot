@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
+from app.indexing import IndexCancelledError
 from app.main import app
 from app.processing import (
     _TaskHeartbeat,
@@ -86,6 +87,35 @@ def test_processing_task_persists_failure_reason_and_retry_count_in_memory_fallb
     retried = retry_parse_task(task.task_id)
     assert retried.status == "ACCEPTED"
     assert retried.retry_count == 0
+
+
+def test_cancelled_indexing_is_terminal_and_never_retried(monkeypatch) -> None:
+    """文档在解析途中被删除：任务必须立即终止。
+
+    走通用重试会把刚删掉的向量再写回去 —— 也就是「删除后复活」。
+    """
+    request = ParseDocumentRequest(
+        object_key="kb/20/deleted.txt", filename="deleted.txt", content_type="text/plain", knowledge_base_id=20
+    )
+    monkeypatch.setattr("app.processing.settings.task_max_retries", 3)
+    task = submit_parse_task(request)
+    monkeypatch.setattr("app.processing.download_object", lambda _: "团队知识库内容".encode())
+
+    attempts: list = []
+
+    def cancelled_index(*args: object, **kwargs: object) -> None:
+        attempts.append(args)
+        raise IndexCancelledError("document kb/20/deleted.txt was deleted; indexing cancelled")
+
+    monkeypatch.setattr("app.processing.index_chunks", cancelled_index)
+
+    process_parse_task(task.task_id, request)
+
+    final = get_parse_task(task.task_id)
+    assert final.status == "FAILED"
+    assert "IndexCancelledError" in final.failure_reason
+    assert final.retry_count == 0, "取消不该计入重试次数"
+    assert len(attempts) == 1, "取消之后仍然重试了，删除的向量会被写回来"
 
 
 # --------------------------------------------------------------------------

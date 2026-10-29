@@ -74,19 +74,44 @@ def stream_answer_question(
         method="POST",
     )
     answer_parts: list[str] = []
-    with urlopen(request, timeout=90) as response:
-        for raw_line in response:
-            line = raw_line.decode("utf-8").strip()
-            if not line.startswith("data:"):
-                continue
-            payload = line[5:].strip()
-            if payload == "[DONE]":
-                break
-            try:
-                delta = json.loads(payload)["choices"][0].get("delta", {}).get("content", "")
-            except (KeyError, IndexError, TypeError, json.JSONDecodeError):
-                continue
-            if delta:
-                answer_parts.append(delta)
-                yield {"event": "delta", "data": {"content": delta}}
+    # 只有真的看到 [DONE] 才算正常结束。EOF 也可能意味着上游截断（网络断开、
+    # 代理超时），此时把已收到的半截内容标成 complete，等于把失败伪装成成功 ——
+    # 前端不会提示重试，用户拿到的是被悄悄截断的答案。
+    completed = False
+    try:
+        with urlopen(request, timeout=90) as response:
+            for raw_line in response:
+                line = raw_line.decode("utf-8").strip()
+                if not line.startswith("data:"):
+                    continue
+                payload = line[5:].strip()
+                if payload == "[DONE]":
+                    completed = True
+                    break
+                try:
+                    frame = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(frame, dict) and frame.get("error"):
+                    yield {"event": "error", "data": {"message": f"模型服务返回错误：{_error_message(frame['error'])}"}}
+                    return
+                try:
+                    delta = frame["choices"][0].get("delta", {}).get("content", "")
+                except (KeyError, IndexError, TypeError):
+                    continue
+                if delta:
+                    answer_parts.append(delta)
+                    yield {"event": "delta", "data": {"content": delta}}
+    except Exception as exception:  # noqa: BLE001 - 读取中断也要变成事件流里的 error，而不是断连接
+        yield {"event": "error", "data": {"message": f"模型流式调用失败：{exception}"}}
+        return
+    if not completed:
+        yield {"event": "error", "data": {"message": "模型输出流未正常结束，回答可能不完整，请重试"}}
+        return
     yield {"event": "complete", "data": {"answer": "".join(answer_parts), "sources": sources}}
+
+
+def _error_message(error: object) -> str:
+    if isinstance(error, dict):
+        return str(error.get("message") or error.get("type") or "unknown error")
+    return str(error)

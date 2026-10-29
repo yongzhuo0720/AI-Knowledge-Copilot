@@ -1,6 +1,7 @@
 import hashlib
 import math
 import json
+from threading import RLock
 from urllib.request import Request, urlopen
 
 DIMENSION = 1024
@@ -34,6 +35,49 @@ def _escape_object_key(object_key: str) -> str:
     ``object_key == "..."`` 这个表达式被提前闭合，轻则过滤失效，重则语法错误。
     """
     return object_key.replace('\\', '\\\\').replace('"', '\\"')
+
+
+# --------------------------------------------------------------------------- #
+# 删除屏障：in-flight 索引不能把已删除的文档写回来
+# --------------------------------------------------------------------------- #
+#
+# 场景：解析任务正在 embedding（每片一次 HTTP，可能几十秒），用户同时删除了这篇文档。
+# 删除先完成、索引随后 insert —— MySQL 元数据已经没了，向量却还在：检索命中得到，
+# 又没有任何记录指向它，等于一份删不掉的残留内容。
+#
+# 做法：写入与删除共用一把进程内锁。删除在锁内完成「删向量 → 立墓碑」，
+# 索引在锁内复查墓碑后才写入；看到墓碑就抛 IndexCancelledError 放弃本次写入。
+# 墓碑是永久的：被删文档的 object_key 不会再被合法复用（上传每次都生成新的 UUID 目录），
+# 不存在「删除后还要重新索引同一个 key」的正常路径。
+#
+# 适用范围：ai-service 以**单 worker** 部署（Dockerfile 未加 --workers），解析与删除
+# 都在同一进程里，进程内锁足够；多副本部署要换成 Milvus 侧版本号或共享协调者。
+# 墓碑只活在内存里，重启即清空 —— 重启后恢复循环只会捡起 MySQL 里 ACCEPTED/RETRYING
+# 的任务，而那些文档的对象已随删除清掉，下载阶段就会失败，写不回向量。
+
+
+class IndexCancelledError(RuntimeError):
+    """写入前发现目标文档/知识库已被删除，本次索引放弃。
+
+    **不可重试**：重试只会把已删除的内容写回去。解析任务必须把它当终态处理，
+    而不是走普通的失败重试。
+    """
+
+
+# 可重入：写入临界区里会再次调用 _assert_not_deleted 复查同一组墓碑。
+_index_write_lock = RLock()
+_deleted_documents: set[tuple[int, str]] = set()
+_deleted_knowledge_bases: set[int] = set()
+
+
+def _assert_not_deleted(knowledge_base_id: int, object_key: str) -> None:
+    with _index_write_lock:
+        if knowledge_base_id in _deleted_knowledge_bases:
+            raise IndexCancelledError(f"knowledge base {knowledge_base_id} was deleted; indexing cancelled")
+        if (knowledge_base_id, object_key) in _deleted_documents:
+            raise IndexCancelledError(
+                f"document {object_key} in knowledge base {knowledge_base_id} was deleted; indexing cancelled"
+            )
 
 
 # --------------------------------------------------------------------------- #
@@ -131,15 +175,26 @@ def iter_all_rows(
 
 
 def delete_chunks(knowledge_base_id: int, object_key: str) -> None:
+    """删除单篇文档的向量，并立起墓碑挡住可能还在途的索引任务。
+
+    墓碑只在删除**成功**后才立：Milvus 不可用时这里会抛异常，后端随即保留元数据
+    让用户重试（fail-closed，见后端 ``KnowledgeService.deleteDocument``）；
+    此时不能把文档标成「已删除」，否则重试成功后重新解析会被误取消。
+    """
     from pymilvus import Collection, connections, utility
     from app.settings import settings
 
     connections.connect(alias="default", host=settings.milvus_host, port=str(settings.milvus_port))
-    if not utility.has_collection(COLLECTION_NAME):
-        return
-    collection = Collection(COLLECTION_NAME)
-    collection.delete(f'knowledge_base_id == {knowledge_base_id} and object_key == "{_escape_object_key(object_key)}"')
-    collection.flush()
+    with _index_write_lock:
+        # 集合不存在 = 本来就没有可删的向量；仍然要立墓碑：
+        # 并发的 index_chunks 可能正准备创建集合并写入。
+        if utility.has_collection(COLLECTION_NAME):
+            collection = Collection(COLLECTION_NAME)
+            collection.delete(
+                f'knowledge_base_id == {knowledge_base_id} and object_key == "{_escape_object_key(object_key)}"'
+            )
+            collection.flush()
+        _deleted_documents.add((knowledge_base_id, object_key))
     # 语料变了，关键词索引必须失效，否则 BM25 会继续在旧语料上打分
     _invalidate_keyword_corpus(knowledge_base_id)
 
@@ -149,16 +204,18 @@ def delete_knowledge_base_chunks(knowledge_base_id: int) -> None:
 
     管理员删库时调用：只删 MySQL 行会让向量继续留在 Milvus 里，既能被直接
     查询到，也会让同名知识库重建时检索到已删除的内容。删除是幂等的。
+    删除成功后立知识库级墓碑，挡住在途的索引任务把内容写回来。
     """
     from pymilvus import Collection, connections, utility
     from app.settings import settings
 
     connections.connect(alias="default", host=settings.milvus_host, port=str(settings.milvus_port))
-    if not utility.has_collection(COLLECTION_NAME):
-        return
-    collection = Collection(COLLECTION_NAME)
-    collection.delete(f"knowledge_base_id == {knowledge_base_id}")
-    collection.flush()
+    with _index_write_lock:
+        if utility.has_collection(COLLECTION_NAME):
+            collection = Collection(COLLECTION_NAME)
+            collection.delete(f"knowledge_base_id == {knowledge_base_id}")
+            collection.flush()
+        _deleted_knowledge_bases.add(knowledge_base_id)
     _invalidate_keyword_corpus(knowledge_base_id)
 
 
@@ -174,10 +231,14 @@ def index_chunks(
     :param on_progress: 可选回调 ``on_progress(done, total)``，每完成一片
         embedding 调用一次。解析任务用它把「正在生成向量」的进度报给前端；
         其他调用方（重建索引脚本、检索链路）不传即可，零影响。
+    :raises IndexCancelledError: 目标文档/知识库已在本次索引期间被删除。
+        这是**终态**，调用方不能重试。
     """
     from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, connections, utility
     from app.settings import settings
 
+    # 先查墓碑再连 Milvus：文档已经删了，就不该再为它花 embedding 的钱。
+    _assert_not_deleted(knowledge_base_id, object_key)
     connections.connect(alias="default", host=settings.milvus_host, port=str(settings.milvus_port))
     if not utility.has_collection(COLLECTION_NAME):
         schema = CollectionSchema([
@@ -200,14 +261,21 @@ def index_chunks(
         embeddings.append(embed(chunk))
         if on_progress is not None:
             on_progress(done, total)
-    if replace_existing:
-        collection.delete(
-            f'knowledge_base_id == {knowledge_base_id} and object_key == "{_escape_object_key(object_key)}"'
+    identifiers = [hashlib.sha256(f"{object_key}:{index}".encode()).hexdigest() for index in range(len(chunks))]
+    # embedding 是整条链路里最慢的一段（每片一次 HTTP），删除随时可能在这期间插进来。
+    # 删除方持有同一把锁、且在删完向量之后才立墓碑：所以这里读不到墓碑，就说明我的
+    # 写入要么排在删除之前（随后被它一并删掉），要么删除还没开始。
+    with _index_write_lock:
+        _assert_not_deleted(knowledge_base_id, object_key)
+        if replace_existing:
+            collection.delete(
+                f'knowledge_base_id == {knowledge_base_id} and object_key == "{_escape_object_key(object_key)}"'
+            )
+            collection.flush()
+        collection.insert(
+            [identifiers, [knowledge_base_id] * len(chunks), [object_key] * len(chunks), chunks, embeddings]
         )
         collection.flush()
-    identifiers = [hashlib.sha256(f"{object_key}:{index}".encode()).hexdigest() for index in range(len(chunks))]
-    collection.insert([identifiers, [knowledge_base_id] * len(chunks), [object_key] * len(chunks), chunks, embeddings])
-    collection.flush()
     # 新文档入库后必须让关键词索引失效，否则新内容在 BM25 里搜不到（最长要到缓存过期才可见）
     _invalidate_keyword_corpus(knowledge_base_id)
 

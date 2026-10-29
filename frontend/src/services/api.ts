@@ -537,21 +537,32 @@ export async function streamConversation(
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
+  let completed = false
+  let streamError = ''
   const consume = (block: string) => {
-    const eventName = block.match(/^event:\s*(.+)$/m)?.[1]?.trim()
-    const dataLine = block.match(/^data:\s*(.+)$/m)?.[1]
-    if (!eventName || !dataLine) return
-    onEvent({ event: eventName, data: JSON.parse(dataLine) } as ConversationStreamEvent)
+    const eventName = block.match(/^event:[ \t]*(.+)$/m)?.[1]?.trim()
+    // SSE 允许多行 data：同一事件内的所有 data 行用 \n 拼接后才是完整载荷。
+    const dataLines = Array.from(block.matchAll(/^data:[ \t]?(.*)$/gm), (match) => match[1])
+    if (!eventName || dataLines.length === 0) return
+    const data = JSON.parse(dataLines.join('\n')) as unknown
+    if (eventName === 'complete') completed = true
+    if (eventName === 'error') streamError = (data as { message?: string }).message ?? ''
+    onEvent({ event: eventName, data } as ConversationStreamEvent)
   }
   while (true) {
     const { value, done } = await reader.read()
     buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done })
+    // SSE 允许 \r\n / \n / \r 三种换行；不先归一化，CRLF 帧（\r\n\r\n）永远拆不开
+    buffer = buffer.replace(/\r\n?/g, '\n')
     const blocks = buffer.split('\n\n')
     buffer = blocks.pop() ?? ''
     blocks.filter(Boolean).forEach(consume)
     if (done) break
   }
   if (buffer.trim()) consume(buffer)
+  // 收到 complete 才代表后端已落库完整回答；EOF 截断（断连/代理超时）必须报错，
+  // 否则界面既不追加回答也不提示失败，用户只能看到自己那条提问。
+  if (!completed) throw new Error(streamError || '流式回答未正常结束，请重试')
 }
 
 // ---------------------------------------------------------------------------

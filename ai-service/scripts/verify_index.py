@@ -147,8 +147,12 @@ def check_answers(payload: dict, chunks: list[dict]) -> list[dict]:
     return absent
 
 
-def clean_unfinished_tasks() -> int:
-    """清掉非 COMPLETED 的残留任务，避免周期性恢复循环在做观测时改索引。"""
+def clean_unfinished_tasks(knowledge_base_id: int) -> int:
+    """清掉**本知识库**非 COMPLETED 的残留任务，避免周期性恢复循环在做观测时改索引。
+
+    必须按知识库过滤：这行 DELETE 是真删任务行，误删其他知识库的 ACCEPTED/RETRYING
+    任务，那些文档就会永远停在中途状态 —— 而调用方的观测目的只覆盖一个知识库。
+    """
     import pymysql
 
     connection = pymysql.connect(
@@ -161,7 +165,10 @@ def clean_unfinished_tasks() -> int:
     )
     try:
         with connection.cursor() as cursor:
-            cursor.execute("DELETE FROM document_processing_task WHERE status <> 'COMPLETED'")
+            cursor.execute(
+                "DELETE FROM document_processing_task WHERE status <> 'COMPLETED' AND knowledge_base_id = %s",
+                (knowledge_base_id,),
+            )
             return cursor.rowcount
     finally:
         connection.close()
@@ -238,7 +245,7 @@ def main() -> int:
         if payload is None:
             print("--reindex 需要同时提供 --questions（用来确定该重建哪些文档）")
             return 2
-        removed = clean_unfinished_tasks()
+        removed = clean_unfinished_tasks(knowledge_base_id)
         print(f"清理非 COMPLETED 残留任务：{removed} 条")
         keys, missing_docs = _targets(payload)
         print(f"\n评估集声明 {len(payload.get('corpus') or [])} 篇，对象存储中找到 {len(keys)} 篇")

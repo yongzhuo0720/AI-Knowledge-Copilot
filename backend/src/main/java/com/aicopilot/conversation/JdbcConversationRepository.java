@@ -6,6 +6,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.PreparedStatement;
 import java.sql.Statement;
@@ -114,17 +115,28 @@ public class JdbcConversationRepository implements ConversationRepository {
         jdbcTemplate.update("DELETE FROM conversation_session WHERE id = ?", sessionId);
     }
 
+    /**
+     * 消息主体 + 来源 + Agent 步骤必须一起落库。
+     *
+     * <p>这是一段**短本地事务**，和 {@link ConversationService#askAgent} /
+     * {@link ConversationService#streamAsk} 刻意不加事务并不冲突：调用方不持有事务，
+     * 每条 saveMessage 各自借还连接，不会把数据库连接跨越模型 HTTP 调用绑死 90 秒。
+     * 若来源或步骤写到一半失败（比如对象键为空触发 NOT NULL），主消息也会回滚 ——
+     * 否则会留下一条「有提问没引用」的半成品助手消息，刷新历史后无从解释。
+     */
     @Override
+    @Transactional
     public ConversationMessage saveMessage(ConversationMessage message) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement statement = connection.prepareStatement(
-                    "INSERT INTO conversation_message (session_id, role, content) VALUES (?, ?, ?)",
+                    "INSERT INTO conversation_message (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
                     Statement.RETURN_GENERATED_KEYS
             );
             statement.setLong(1, message.sessionId());
             statement.setString(2, message.role());
             statement.setString(3, message.content());
+            statement.setTimestamp(4, Timestamp.from(message.createdAt()));
             return statement;
         }, keyHolder);
         Number id = keyHolder.getKey();

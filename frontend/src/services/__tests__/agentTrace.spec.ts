@@ -20,6 +20,7 @@ describe('resultUnit', () => {
     ['knowledge_search', '片'],
     ['list_documents', '篇'],
     ['document_outline', '小节'],
+    ['fallback', '片'],
   ])('%s 的量词是「%s」，与工具说明书一致', (tool, unit) => {
     expect(resultUnit(tool)).toBe(unit)
   })

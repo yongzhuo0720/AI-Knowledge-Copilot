@@ -7,7 +7,9 @@
 """
 
 import importlib.util
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "verify_index.py"
 _spec = importlib.util.spec_from_file_location("verify_index", _SCRIPT)
@@ -87,6 +89,47 @@ def test_same_document_listed_once_when_several_chunks_match(capsys) -> None:
 
     output = capsys.readouterr().out
     assert output.count("catalog.md") == 1
+
+
+class _FakeCursor:
+    def __init__(self, executed: list, rowcount: int) -> None:
+        self.executed = executed
+        self.rowcount = rowcount
+
+    def __enter__(self) -> "_FakeCursor":
+        return self
+
+    def __exit__(self, *_exc_info: object) -> bool:
+        return False
+
+    def execute(self, sql: str, parameters: tuple | None = None) -> None:
+        self.executed.append((sql, parameters))
+
+
+class _FakeConnection:
+    def __init__(self, cursor: _FakeCursor) -> None:
+        self._cursor = cursor
+
+    def cursor(self) -> _FakeCursor:
+        return self._cursor
+
+    def close(self) -> None:
+        pass
+
+
+def test_clean_unfinished_tasks_only_touches_the_target_knowledge_base(monkeypatch) -> None:
+    """清理残留任务是**真删任务行**：没有知识库过滤会误删其他知识库的进行中任务。"""
+    executed: list = []
+    monkeypatch.setitem(sys.modules, "pymysql", SimpleNamespace(
+        connect=lambda **kwargs: _FakeConnection(_FakeCursor(executed, rowcount=3)),
+    ))
+
+    removed = verify_index.clean_unfinished_tasks(31)
+
+    assert removed == 3
+    sql, parameters = executed[0]
+    assert "knowledge_base_id = %s" in sql
+    assert parameters == (31,)
 
 
 def test_reliability_requires_every_signal() -> None:

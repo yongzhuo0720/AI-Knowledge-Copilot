@@ -26,7 +26,7 @@
 **平台与安全**
 
 - 注册登录、Redis Bearer Token（8 小时）；**Token 校验回查数据库**——账号封禁后旧 Token 立即失效。
-- 工作空间 / 成员 / 知识库三层权限隔离，授权 fail-closed；仅 OWNER 可管理空间与成员。
+- 工作空间 / 成员 / 知识库三层权限隔离，授权 fail-closed；OWNER 与 ADMIN 可管理成员，OWNER 身份只能由创建者天然持有（成员接口不能分配或改动 OWNER）。
 - 所有触发模型调用的端点共用同一 Redis 限流配额，扣配额发生在鉴权之后、模型调用之前。
 - Backend ↔ AI Service 内部鉴权（共享 `AI_SERVICE_INTERNAL_TOKEN`），服务间调用不再裸奔。
 - 后台管理：用户封禁/删除（级联清理跨用户会话）、工作空间与知识库治理。
@@ -145,7 +145,7 @@ Authorization: Bearer <access-token>
 | `GET` / `POST` | `/api/v1/workspaces` | 我的工作空间 / 创建工作空间 | 登录 |
 | `GET` | `/api/v1/workspaces/{id}/overview` | 空间统计、最近知识库/文档/会话 | 成员 |
 | `GET` | `/api/v1/workspaces/{id}/documents` | 空间文档，可按文件名、状态、知识库筛选 | 成员 |
-| `GET` / `POST` | `/api/v1/workspaces/{id}/members` | 查看 / 添加成员 | 查看：成员；添加：OWNER |
+| `GET` / `POST` | `/api/v1/workspaces/{id}/members` | 查看 / 添加成员 | 查看：成员；添加：OWNER / ADMIN |
 
 ### 知识库与文档
 
@@ -276,7 +276,7 @@ Docker 端到端成功标准：注册/登录成功 → 创建空间与知识库 
 
 **登录返回 `401`** —— 项目没有默认账号，先注册；`401` 也可能是账号被封禁或 Token 过期（8 小时）。
 
-**创建知识库返回 `403`** —— 当前用户不是目标工作空间成员；用「一键创建」或让 OWNER 添加成员。
+**创建知识库返回 `403`** —— 当前用户不是目标工作空间成员；用「一键创建」或让空间 OWNER / ADMIN 添加成员。
 
 **文档一直不是 `COMPLETED`** —— `docker logs -f ai-copilot-ai-service` 查看解析日志；确认 MinIO/Milvus/MySQL 在运行、模型密钥无多余引号。失败任务会展示失败原因并支持重试。
 

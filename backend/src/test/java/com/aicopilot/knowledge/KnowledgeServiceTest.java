@@ -342,7 +342,8 @@ class KnowledgeServiceTest {
     }
 
     @Test
-    void stillDeletesMetadataWhenStorageCleanupFails() {
+    void keepsDocumentWhenVectorCleanupFails() {
+        // 元数据是清理向量的唯一线索：向量删不掉就必须整体中止，不能留下「检索得到、删不掉」的残留。
         KnowledgeRepository repository = mock(KnowledgeRepository.class);
         KnowledgeIndexClient indexClient = mock(KnowledgeIndexClient.class);
         ObjectStorageService storageService = mock(ObjectStorageService.class);
@@ -354,6 +355,32 @@ class KnowledgeServiceTest {
         when(repository.findDocument(20L, 30L)).thenReturn(Optional.of(document));
         org.mockito.Mockito.doThrow(new RuntimeException("milvus down")).when(indexClient)
                 .deleteDocumentIndex(20L, "kb/20/guide.pdf");
+
+        assertThatThrownBy(() ->
+                        new KnowledgeService(repository, mock(DocumentProcessingClient.class), storageService,
+                                mock(KnowledgeRetrievalClient.class), mock(KnowledgeAnswerClient.class),
+                                workspaceRepository, indexClient, mock(DocumentPreviewClient.class))
+                                .deleteDocument(7L, 20L, 30L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getCode()).isEqualTo("DOCUMENT_DELETE_FAILED"));
+
+        verify(repository, org.mockito.Mockito.never()).deleteDocument(any());
+        // 原始对象也不能删：文档还在列表里可见，原文必须跟着一起留下。
+        verifyNoInteractions(storageService);
+    }
+
+    @Test
+    void stillDeletesMetadataWhenObjectStorageCleanupFails() {
+        // 向量已经清掉之后，孤儿对象既不可检索也无人引用，不值得为它阻塞删除。
+        KnowledgeRepository repository = mock(KnowledgeRepository.class);
+        KnowledgeIndexClient indexClient = mock(KnowledgeIndexClient.class);
+        ObjectStorageService storageService = mock(ObjectStorageService.class);
+        Instant createdAt = Instant.parse("2026-09-09T00:00:00Z");
+        KnowledgeDocument document = new KnowledgeDocument(
+                30L, 20L, "guide.pdf", "kb/20/guide.pdf", "application/pdf", 2048L, "COMPLETED", "task-1", createdAt
+        );
+        WorkspaceRepository workspaceRepository = authorize(repository, 20L, 10L, 7L);
+        when(repository.findDocument(20L, 30L)).thenReturn(Optional.of(document));
         org.mockito.Mockito.doThrow(new RuntimeException("minio down")).when(storageService).delete("kb/20/guide.pdf");
 
         new KnowledgeService(repository, mock(DocumentProcessingClient.class), storageService,
@@ -361,6 +388,7 @@ class KnowledgeServiceTest {
                 workspaceRepository, indexClient, mock(DocumentPreviewClient.class))
                 .deleteDocument(7L, 20L, 30L);
 
+        verify(indexClient).deleteDocumentIndex(20L, "kb/20/guide.pdf");
         verify(repository).deleteDocument(30L);
     }
 

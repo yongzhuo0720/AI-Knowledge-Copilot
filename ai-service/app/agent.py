@@ -60,7 +60,7 @@ def run_knowledge_agent(
     """
     if not settings.chat_api_key:
         # 没配模型密钥时整条链路不能断 —— 直接退化成「检索 + 模板回答」，功能降级但不失效
-        return _degraded_result(knowledge_base_id, question, history, reason="no chat api key")
+        return _degraded_result(knowledge_base_id, question, history, reason="未配置模型密钥")
 
     messages: list[dict[str, object]] = [{"role": "system", "content": SYSTEM_PROMPT}]
     messages.extend({"role": item["role"].lower(), "content": item["content"]} for item in (history or []))
@@ -121,9 +121,15 @@ def run_knowledge_agent(
                     "name": name or "unknown",
                     "content": content,
                 })
-    except Exception:
+    except Exception as exception:
         logger.exception("knowledge agent tool calling failed; falling back to retrieval answer")
-        return _degraded_result(knowledge_base_id, question, history, reason="tool calling failed")
+        return _degraded_result(
+            knowledge_base_id,
+            question,
+            history,
+            reason=f"工具调用失败（{exception.__class__.__name__}）",
+            steps=steps,
+        )
 
     return _finalize(knowledge_base_id, messages, sources, steps)
 
@@ -178,22 +184,32 @@ def _degraded_result(
     question: str,
     history: list[dict[str, str]] | None,
     reason: str,
+    steps: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """降级路径：不走工具，直接用「检索 + 模板回答」给出结果。
 
     ``answer_question`` 在整个模块里**只用在这里**。正常路径下最终答案必须来自模型正文，
     否则工具调用顺序会悄悄变成影响答案的隐藏变量。
+
+    ``steps`` 是降级前**真实执行过**的工具步骤，必须原样保留：曾经这里会把它整个替换成
+    一条伪造的 ``knowledge_search``，于是「先列文档、再超时降级」的轨迹看起来像「检索成功」——
+    排查故障时等于把最关键的证据抹掉了。降级本身另起一条 ``fallback`` 步骤如实记录。
+
+    ``sources`` 只用降级检索自己的结果：最终回答由 ``answer_question`` 生成，
+    其中的 [1]、[2] 编号只对那一批来源成立，混入更早的来源会让编号错位。
     """
-    logger.info("knowledge agent degraded (%s)", reason)
+    logger.info("knowledge agent degraded: %s", reason)
     fallback = answer_question(knowledge_base_id, question, history)
+    trace = list(steps or [])
+    trace.append({
+        "tool": "fallback",
+        "query": f"降级：{reason}，改为检索直答",
+        "result_count": len(fallback["sources"]),
+    })
     return {
         "answer": fallback["answer"],
         "sources": fallback["sources"],
-        "steps": [{
-            "tool": "knowledge_search",
-            "query": describe_call("knowledge_search", {"query": question}),
-            "result_count": len(fallback["sources"]),
-        }],
+        "steps": trace,
     }
 
 

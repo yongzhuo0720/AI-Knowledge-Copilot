@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import com.aicopilot.common.api.ApiResponse;
 import com.aicopilot.common.ratelimit.RateLimitProperties;
 import com.aicopilot.common.ratelimit.RateLimiter;
+import com.aicopilot.common.security.ProxyTrustProperties;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -27,17 +28,20 @@ public class UserController {
     private final AuthenticationService authenticationService;
     private final RateLimiter rateLimiter;
     private final RateLimitProperties rateLimitProperties;
+    private final ProxyTrustProperties proxyTrustProperties;
 
     public UserController(
             UserService userService,
             AuthenticationService authenticationService,
             RateLimiter rateLimiter,
-            RateLimitProperties rateLimitProperties
+            RateLimitProperties rateLimitProperties,
+            ProxyTrustProperties proxyTrustProperties
     ) {
         this.userService = userService;
         this.authenticationService = authenticationService;
         this.rateLimiter = rateLimiter;
         this.rateLimitProperties = rateLimitProperties;
+        this.proxyTrustProperties = proxyTrustProperties;
     }
 
     /**
@@ -57,9 +61,18 @@ public class UserController {
         return ApiResponse.success(userService.register(request));
     }
 
+    /**
+     * 只有请求确实来自受信代理（nginx 容器所在网段）时才采用 {@code X-Real-IP}；
+     * 直连 8080 的请求一律用 socket 地址 —— 否则任何人都能靠伪造这个头换一个
+     * 限流身份，注册限流（按 IP 计数）就形同虚设。
+     */
     private String clientIp(HttpServletRequest request) {
+        String remoteAddr = request.getRemoteAddr();
+        if (!proxyTrustProperties.isTrustedProxy(remoteAddr)) {
+            return remoteAddr;
+        }
         String realIp = request.getHeader("X-Real-IP");
-        return realIp == null || realIp.isBlank() ? request.getRemoteAddr() : realIp.trim();
+        return realIp == null || realIp.isBlank() ? remoteAddr : realIp.trim();
     }
 
     @PostMapping("/login")

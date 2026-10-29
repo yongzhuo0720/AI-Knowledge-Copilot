@@ -4,7 +4,7 @@ from threading import Event, Lock, Thread
 from uuid import uuid4
 
 from app.chunking import chunk_document
-from app.indexing import index_chunks
+from app.indexing import IndexCancelledError, index_chunks
 from app.schemas import ParseDocumentRequest, ParseTaskResponse
 from app.settings import settings
 from app.storage import download_object
@@ -229,6 +229,13 @@ def process_parse_task(task_id: str, request: ParseDocumentRequest | None = None
                         )
                         _clear_progress(task_id)
                         _set_task(task_id, "COMPLETED", None, task.retry_count)
+                        return
+                    except IndexCancelledError as exception:
+                        # 文档/知识库已在处理期间被删除：立即终止，**不走重试** ——
+                        # 重试会把刚删掉的向量再写回去，正是「删除后复活」。
+                        _clear_progress(task_id)
+                        _set_task(task_id, "FAILED", _failure_reason(exception), task.retry_count)
+                        logger.info("parse task %s cancelled: %s", task_id, exception)
                         return
                     except Exception as exception:
                         next_retry_count = task.retry_count + 1
