@@ -22,9 +22,13 @@ class Settings(BaseSettings):
     task_retry_backoff_seconds: float = 0.1
     task_recovery_interval_seconds: int = 5
     task_processing_stale_seconds: int = 300
-    embedding_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    embedding_base_url: str = "https://api.siliconflow.cn/v1"
     embedding_api_key: str = ""
-    embedding_model: str = "text-embedding-v4"
+    embedding_model: str = "BAAI/bge-m3"
+    # 是否向 provider 传 dimensions。0 = 不传：部分 OpenAI 兼容服务（如硅基流动的
+    # BAAI 系列）不接受该参数，而 bge-m3 本身就是 1024 维。非 0 值必须等于
+    # indexing.DIMENSION，否则写入 Milvus 时会因维度不匹配失败。
+    embedding_dimensions: int = 0
     chat_base_url: str = "https://api.deepseek.com"
     chat_api_key: str = ""
     chat_model: str = "deepseek-chat"
@@ -64,7 +68,7 @@ class Settings(BaseSettings):
     # 否则退回本地「标识符加法提权」——它只提权、不重排序，因此不会让融合结果变差。
     rerank_enabled: bool = True
     # generic: Cohere/Jina 兼容的 {base_url}/rerank（通用但需自备服务）
-    # dashscope: 阿里百炼 gte-rerank 原生端点（与 embedding 同一密钥体系，无需额外开通）
+    # dashscope: 阿里百炼 gte-rerank 原生端点（独立于 Embedding 的可选密钥，需在 compose 里单独接线）
     rerank_provider: str = "generic"
     rerank_base_url: str = ""
     rerank_api_key: str = ""

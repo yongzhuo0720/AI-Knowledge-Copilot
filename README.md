@@ -12,8 +12,8 @@
 
 - 文档上传：TXT、Markdown、CSV、PDF、DOCX、XLSX、PPTX、HTML。
 - 解析流水线：MinIO 存原文件 → 文本提取（含 DOCX 表格、xlsx 工作表、pptx 幻灯片、HTML 正文）→ 结构感知切片 → Embedding → Milvus 向量索引。
-- 三路检索：向量（`text-embedding-v4`，1024 维）、BM25 关键词、混合（RRF 融合 + 标识符加法提权）。
-- 结构感知切片：每个 chunk 携带标题链前缀，纯向量 Hit@1 从 60.7% 提升到 78.6%；混合检索在 28 题评估集上 Hit@1 100%（口径见 `docs/检索效果评估报告.md`）。
+- 三路检索：向量（`BAAI/bge-m3`，1024 维；OpenAI 兼容，provider 可配）、BM25 关键词、混合（RRF 融合 + 标识符加法提权）。
+- 结构感知切片：每个 chunk 携带标题链前缀，纯向量 Hit@1 从 60.7% 提升到 78.6%（`text-embedding-v4` 口径；切 `bge-m3` 后复测 82.1%）；混合检索在 28 题评估集上 Hit@1 100%（口径见 `docs/检索效果评估报告.md`）。
 - 删除全链路：删除知识库/文档时同步清理 Milvus 向量、MinIO 对象与 MySQL 元数据，避免同名文档重新上传后检索到旧内容。
 - 解析任务可靠执行：MySQL 条件 UPDATE 乐观抢占、失败自动重试、服务重启后恢复未完成任务。
 
@@ -89,7 +89,7 @@ cd D:\ai_project\AI_agent
 Copy-Item deploy\.env.example deploy\.env
 ```
 
-编辑 `deploy/.env`，至少配置数据库、MinIO 凭据；如果要启用真实模型，再填入 `DEEPSEEK_API_KEY` 与 `DASHSCOPE_API_KEY`。
+编辑 `deploy/.env`，至少配置数据库、MinIO 凭据；如果要启用真实模型，再填入 `DEEPSEEK_API_KEY` 与 `EMBEDDING_API_KEY`（`DASHSCOPE_API_KEY` 仅启用远端 rerank 时需要）。
 
 真实密钥只允许保存在本地 `deploy/.env`，不要写入 README、`.env.example`、代码或 Git。
 
@@ -201,7 +201,7 @@ Authorization: Bearer <access-token>
 
 | 评估集 | 规模 | 结果 |
 | --- | --- | --- |
-| 文本语料（10 篇 md → 44 chunk） | 28 题 + 12 道换说法题 | 混合检索 Hit@1 **100%**；纯向量 78.6%；纯关键词 85.7% |
+| 文本语料（10 篇 md → 44 chunk） | 28 题 + 12 道换说法题 | 混合检索 Hit@1 **100%**；纯向量 78.6%（`bge-m3` 复测 82.1%）；纯关键词 85.7% |
 | 新格式语料（xlsx/pptx/csv/html → 10 chunk） | 13 题 | Recall@5 **13/13 全召回** |
 
 关键结论（完整口径与分析见 `docs/检索效果评估报告.md`）：
@@ -221,8 +221,13 @@ Authorization: Bearer <access-token>
 | --- | --- |
 | `MYSQL_*` / `MINIO_*` | 数据库与对象存储凭据 |
 | `DEEPSEEK_API_KEY` | DeepSeek 对话模型密钥 |
-| `DASHSCOPE_API_KEY` | 百炼 Embedding 密钥 |
+| `EMBEDDING_BASE_URL` / `EMBEDDING_MODEL` | OpenAI 兼容的 Embedding 端点与模型（默认硅基流动 `BAAI/bge-m3`） |
+| `EMBEDDING_DIMENSIONS` | 是否发送 `dimensions`：0 = 不发送（BAAI 系列不接受）；非 0 必须等于 1024 |
+| `EMBEDDING_API_KEY` | Embedding 服务密钥 |
+| `DASHSCOPE_API_KEY` | 可选：仅启用 DashScope 远端 rerank 时需要 |
 | `AI_SERVICE_INTERNAL_TOKEN` | Backend ↔ AI Service 内部鉴权共享密钥 |
+
+> 换 Embedding 供应商会改变向量空间，必须对**所有在用知识库**重新解析入库；旧向量不会报错，只会让向量召回失真。复测记录见 `docs/检索效果评估报告.md` 第十四节。
 
 AI Service 任务参数（默认值见 `deploy/docker-compose.yml`）：`AI_SERVICE_TASK_MAX_RETRIES=5`、指数退避 3s 起步（共约 93s，覆盖一次 Milvus 冷启动）、每 5s 恢复未完成任务。切片与检索参数集中在 `ai-service/app/settings.py`。
 
@@ -255,7 +260,7 @@ npm run build
 
 ## 验证清单
 
-提交前建议全量跑三层测试（当前基线：后端 121、前端 89、ai-service 220 用例全绿）。CI 会在每次 push / PR 上自动执行同样的三层测试，并用 Docker Compose 拉起真实依赖跑契约探针（模型密钥以 GitHub Secrets 提供时还会跑端到端）。部署后可运行：
+提交前建议全量跑三层测试（当前基线：后端 132、前端 96、ai-service 237 通过 + 2 跳过，合计 465 项）。CI 会在每次 push / PR 上自动执行同样的三层测试，并用 Docker Compose 拉起真实依赖跑契约探针（模型密钥以 GitHub Secrets 提供时还会跑端到端）。部署后可运行：
 
 ```powershell
 # 端到端：注册 → 建空间 → 建库 → 上传 → 解析 → 问答 → 校验执行轨迹落库

@@ -11,9 +11,12 @@ COLLECTION_NAME = "knowledge_chunks_v2"
 def embed(text: str) -> list[float]:
     from app.settings import settings
     if settings.embedding_api_key:
+        payload = {"model": settings.embedding_model, "input": text}
+        if settings.embedding_dimensions > 0:
+            payload["dimensions"] = settings.embedding_dimensions
         request = Request(
             f"{settings.embedding_base_url.rstrip('/')}/embeddings",
-            data=json.dumps({"model": settings.embedding_model, "input": text, "dimensions": DIMENSION}).encode(),
+            data=json.dumps(payload).encode(),
             headers={"Authorization": f"Bearer {settings.embedding_api_key}", "Content-Type": "application/json"},
             method="POST",
         )

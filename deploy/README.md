@@ -51,11 +51,17 @@ MYSQL_PASSWORD=change-me-app
 MINIO_ROOT_USER=minioadmin
 MINIO_ROOT_PASSWORD=change-me-minio
 DEEPSEEK_API_KEY=
+EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
+EMBEDDING_MODEL=BAAI/bge-m3
+EMBEDDING_DIMENSIONS=0
+EMBEDDING_API_KEY=
 DASHSCOPE_API_KEY=
 AI_SERVICE_INTERNAL_TOKEN=change-me-internal-token
 ```
 
-`DEEPSEEK_API_KEY` 用于回答生成，`DASHSCOPE_API_KEY` 用于 `text-embedding-v4` 向量生成。密钥为空时，AI Service 仍可启动，但真实模型调用无法完成。
+`DEEPSEEK_API_KEY` 用于回答生成；`EMBEDDING_API_KEY` 用于向量生成（默认硅基流动免费 `BAAI/bge-m3`，1024 维，`EMBEDDING_DIMENSIONS=0` 表示不发送该参数）；`DASHSCOPE_API_KEY` 仅在启用 DashScope 远端 rerank 时需要。密钥为空时，AI Service 仍可启动，但真实模型调用无法完成。
+
+> 换 Embedding 供应商会改变向量空间，必须对所有在用知识库重新解析入库；旧向量不会报错，只会让向量召回失真。
 
 `AI_SERVICE_INTERNAL_TOKEN` 由 backend 与 ai-service 共享：ai-service 的除 `/api/v1/health` 外的全部接口都要求 `X-Internal-Token` 请求头。生成方式：`python -c "import secrets; print(secrets.token_urlsafe(32))"`，并保证 `.env` 中的值两端一致。留空会关闭校验（仅限本地开发），容器启动日志会给出明确警告。
 
@@ -84,7 +90,7 @@ powershell -ExecutionPolicy Bypass -File .\deploy\smoke-test.ps1
 powershell -ExecutionPolicy Bypass -File .\deploy\smoke-test.ps1 -FilePath .\docs\sample.md
 ```
 
-脚本会额外验证重新解析，以及持久化会话中的 Agent 工具轨迹和引用。脚本兼容 Windows PowerShell 5.1 和 PowerShell 7+，并要求 `deploy/.env` 已配置有效的 DeepSeek 和百炼 Key。
+脚本会额外验证重新解析，以及持久化会话中的 Agent 工具轨迹和引用。脚本兼容 Windows PowerShell 5.1 和 PowerShell 7+，并要求 `deploy/.env` 已配置有效的 DeepSeek 对话 Key 与 Embedding Key（默认硅基流动）。
 
 任务恢复和重试日志：
 

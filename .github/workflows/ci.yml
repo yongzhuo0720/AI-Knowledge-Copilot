@@ -63,7 +63,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # secrets 不能直接用在 job.if 里，先转成 env 再判断（官方文档推荐写法）。
-      HAS_MODEL_KEYS: ${{ secrets.DEEPSEEK_API_KEY != '' }}
+      # 只配了 Chat key 而没配 Embedding key 时，解析会退化成哈希伪向量，e2e 会“假通过”，
+      # 所以两个 key 同时存在才跑真实模型链路。
+      HAS_MODEL_KEYS: ${{ secrets.DEEPSEEK_API_KEY != '' && secrets.EMBEDDING_API_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
       - name: Prepare deploy/.env
@@ -71,6 +73,7 @@ jobs:
           cp deploy/.env.example deploy/.env
           {
             echo "DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}"
+            echo "EMBEDDING_API_KEY=${{ secrets.EMBEDDING_API_KEY }}"
             echo "DASHSCOPE_API_KEY=${{ secrets.DASHSCOPE_API_KEY }}"
           } >> deploy/.env
       # 构建与启动拆成两个 step：失败时步骤状态本身就能区分「镜像构建挂」还是「起容器挂」
@@ -114,7 +117,7 @@ jobs:
       # 契约探针不调模型（配额断言走 403/429 路径），没有密钥也能跑满 33 项
       - name: Contract probes (no model keys needed)
         run: python scripts/verify_c_group.py
-      - name: End-to-end agent flow (needs model API keys)
+      - name: End-to-end agent flow (needs chat + embedding API keys)
         if: env.HAS_MODEL_KEYS == 'true'
         run: python scripts/e2e_agent.py
       - name: Dump logs on failure

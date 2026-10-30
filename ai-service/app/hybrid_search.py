@@ -470,7 +470,8 @@ def _dashscope_rerank(query: str, candidates: list[dict[str, object]], top_n: in
     """阿里百炼（DashScope）原生的文本重排端点，模型 gte-rerank-v2。
 
     选它而不是「自建 bge-reranker + generic 端点」的理由：
-    1. 与 embedding 用**同一把 DASHSCOPE_API_KEY**，不新增供应商、不新增部署件；
+    1. 当年与 embedding 共用 DASHSCOPE_API_KEY，不新增供应商与部署件；2026-10-29
+       embedding 切到硅基流动后，rerank 改为独立可选配置，未配 key 时走本地提权；
     2. 响应的 ``output.results`` 已按 relevance_score 降序，直接按 index 回填即可。
 
     注意 ``results`` 可能少于输入的候选数（服务端会截掉极低分项），
